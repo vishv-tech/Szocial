@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+.next-dev/
+out/
+
+# production
+build/
+
+# local env files
+.env*.local
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+next-dev.*.log
+
+# editor and OS files
+.DS_Store
+Thumbs.db

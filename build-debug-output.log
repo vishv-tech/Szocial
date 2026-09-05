@@ -1,0 +1,63 @@
+
+> szocial@0.1.0 build
+> next build --debug
+
+   ▲ Next.js 15.5.18
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 24.7s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/29) ...
+   Generating static pages (7/29) 
+   Generating static pages (14/29) 
+   Generating static pages (21/29) 
+ ✓ Generating static pages (29/29)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+
+Redirects
+┌ source: /:path+/
+├ destination: /:path+
+└ permanent: true
+
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                      162 B         106 kB
+├ ○ /_not-found                            997 B         103 kB
+├ ○ /admin                               4.64 kB         131 kB
+├ ○ /admin/login                           167 B         132 kB
+├ ƒ /api/razorpay/create-order             126 B         103 kB
+├ ƒ /api/razorpay/verify-payment           126 B         103 kB
+├ ○ /business/analytics                    172 B         140 kB
+├ ○ /business/dashboard                    173 B         140 kB
+├ ○ /business/login                        167 B         132 kB
+├ ○ /business/messages                     173 B         140 kB
+├ ○ /business/offers                       173 B         140 kB
+├ ○ /business/payment-failed               173 B         140 kB
+├ ○ /business/payment-success              172 B         140 kB
+├ ○ /business/pricing                      173 B         140 kB
+├ ○ /business/profile                      172 B         140 kB
+├ ○ /business/setup                        173 B         140 kB
+├ ○ /business/signup                       167 B         132 kB
+├ ○ /businesses                            173 B         147 kB
+├ ƒ /businesses/[id]                       172 B         147 kB
+├ ○ /chats                                 172 B         147 kB
+├ ○ /explore                               173 B         147 kB
+├ ○ /help                                  173 B         147 kB
+├ ○ /home                                  173 B         147 kB
+├ ○ /login                                 167 B         132 kB
+├ ○ /my-posts                              173 B         147 kB
+├ ○ /post                                  173 B         147 kB
+├ ○ /profile                               172 B         147 kB
+└ ○ /signup                                168 B         132 kB
++ First Load JS shared by all             102 kB
+  ├ chunks/493-38dd501cd76b5ad2.js       46.2 kB
+  ├ chunks/4bd1b696-c023c6e3521b1417.js  54.2 kB
+  └ other shared chunks (total)          1.99 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
