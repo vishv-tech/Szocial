@@ -1,4 +1,8 @@
+"use client";
+
+import {useRef,useState} from "react";
 import Link from "next/link";
+import {useToast} from "@/components/ToastProvider";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +63,7 @@ function buttonClasses({
 }
 
 export function Button(props: ButtonProps) {
+  const [pending,setPending]=useState(false),lock=useRef(false);const {notify}=useToast();
   if (props.href !== undefined) {
     const {
       children,
@@ -82,6 +87,7 @@ export function Button(props: ButtonProps) {
     size = "md",
     type,
     variant = "primary",
+    onClick,disabled,
     ...buttonProps
   } = props;
 
@@ -90,8 +96,11 @@ export function Button(props: ButtonProps) {
       className={buttonClasses({ className, size, variant })}
       type={type ?? "button"}
       {...buttonProps}
+      disabled={disabled||pending}
+      aria-busy={pending||buttonProps['aria-busy']}
+      onClick={event=>{if(lock.current){event.preventDefault();return;}const result=(onClick as ((event:React.MouseEvent<HTMLButtonElement>)=>unknown)|undefined)?.(event);if(result&&typeof (result as Promise<unknown>).then==='function'){lock.current=true;setPending(true);void Promise.resolve(result).catch(()=>{notify({title:"Action could not be completed",description:"Please try again.",variant:"warning"});}).finally(()=>{lock.current=false;setPending(false);});}}}
     >
-      {children}
+      {pending?<span aria-hidden="true" className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"/>:null}{children}
     </button>
   );
 }

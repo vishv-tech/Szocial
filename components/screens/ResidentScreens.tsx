@@ -44,7 +44,8 @@ import { useToast } from "@/components/ToastProvider";
 import type { LocalPost, LocationInfo, ResidentUser } from "@/types";
 import { type FeedSort } from "@/lib/feed";
 import { useFeedLocation } from "@/components/useFeedLocation";
-import { useServerFeed } from "@/components/useServerFeed";
+import { api } from "@/lib/client-api";
+import { useServerFeed, useFeedPreference } from "@/components/useServerFeed";
 import { FeedPaging } from "@/components/FeedPaging";
 import { FeedSortControl } from "@/components/FeedSortControl";
 import { getLocationName } from "@/lib/location";
@@ -167,9 +168,9 @@ function HomeRightPanel() {
 export function HomeScreen() {
   useFeedLocation();
   const { currentUser, locationLabel } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<FeedSort>("nearby");
-  const [tab, setTab] = useState<(typeof postTabs)[number]>("All");
+  const [query, setQuery] = useFeedPreference<string>("home-query", "");
+  const [sort, setSort] = useFeedPreference<FeedSort>("home-sort","nearby");
+  const [tab, setTab] = useFeedPreference<(typeof postTabs)[number]>("home-tab","All");
   const [locationOpen, setLocationOpen] = useState(false);
 
   const feed = useServerFeed(query,sort,'All',tab==='Fun'?'fun':tab==='Help'?'help':undefined);
@@ -222,9 +223,9 @@ export function HomeScreen() {
 export function ExploreScreen() {
   useFeedLocation();
   const { state, currentUser, locationLabel } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<FeedSort>("nearby");
-  const [category, setCategory] = useState<(typeof exploreCategories)[number]>("All");
+  const [query, setQuery] = useFeedPreference<string>("explore-query", "");
+  const [sort, setSort] = useFeedPreference<FeedSort>("explore-sort","nearby");
+  const [category, setCategory] = useFeedPreference<(typeof exploreCategories)[number]>("explore-category","All");
 
   const feed = useServerFeed(query,sort,category);
   const featuredPosts = feed.posts;
@@ -547,8 +548,8 @@ export function CreatePostScreen() {
 export function HelpScreen() {
   useFeedLocation();
   const { state, locationLabel } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<(typeof helpTabs)[number]>("Need Help");
+  const [query, setQuery] = useFeedPreference<string>("help-query", "");
+  const [tab, setTab] = useFeedPreference<(typeof helpTabs)[number]>("help-tab","Need Help");
   const feed = useServerFeed(query,'nearby',tab==='Urgent'?'Urgent':'All','help',tab==='Solved'?'Solved':'Active');
   const helpPosts = feed.posts;
 
@@ -649,6 +650,8 @@ export function MyPostsScreen() {
   const { state, currentUser, deletePost, closePost, updatePost, acceptInterestedUser, rejectInterestedUser } = useAppStore();
   const [tab, setTab] = useState<(typeof myPostTabs)[number]>("Active posts");
   const [interestedPost, setInterestedPost] = useState<LocalPost | null>(null);
+  const [interestedPeople,setInterestedPeople]=useState<Array<{id:string;name:string;profilePhoto?:string;location:{area?:string;city?:string}}>>([]),[peopleError,setPeopleError]=useState(''),[peopleLoading,setPeopleLoading]=useState(false);
+  const openInterested=async(post:LocalPost)=>{setInterestedPost(post);setInterestedPeople([]);setPeopleError('');setPeopleLoading(true);try{const people=[];for(let offset=0;offset<post.interestedUserIds.length;offset+=100){const response=await api<{people:typeof interestedPeople}>('/api/people?ids='+encodeURIComponent(post.interestedUserIds.slice(offset,offset+100).join(',')));people.push(...response.people);}setInterestedPeople(people);}catch{setPeopleError('Could not load interested people. Reopen to retry.');}finally{setPeopleLoading(false);}};
   const ownPosts = newestFirst(
     asArray(state.posts).filter((post) => isCurrentUserPost(post, currentUser.id))
   );
@@ -694,7 +697,7 @@ export function MyPostsScreen() {
                     <CheckCircle2 className="h-4 w-4" />
                     Close Post
                   </Button>
-                  <Button onClick={() => setInterestedPost(post)} variant="secondary">
+                  <Button onClick={() => openInterested(post)} variant="secondary">
                     <UsersRound className="h-4 w-4" />
                     Interested
                   </Button>
@@ -720,8 +723,8 @@ export function MyPostsScreen() {
         title="Interested people"
       >
         <div className="space-y-3">
-          {asArray(interestedPost?.interestedUserIds).map((userId) => {
-            const user = asArray(state.residents).find((resident) => resident.id === userId);
+          {peopleLoading?<p role="status">Loading interested people…</p>:null}{peopleError?<p role="status">{peopleError}</p>:null}
+          {interestedPeople.map((user) => {
             if (!user) return null;
             return (
               <div className="flex items-center gap-3 rounded-2xl bg-szocial-mist p-3" key={user.id}>
@@ -750,7 +753,7 @@ export function MyPostsScreen() {
 
 export function ProfileScreen() {
   const router = useRouter();
-  const { state, currentUser, locationLabel, updateResidentProfile, updatePrivacy, submitVerification, logoutResident } = useAppStore();
+  const { state, pages, currentUser, locationLabel, updateResidentProfile, updatePrivacy, submitVerification, logoutResident } = useAppStore();
   const { notify } = useToast();
   const [editOpen, setEditOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -814,13 +817,13 @@ export function ProfileScreen() {
             </div>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <StatCard label="My posts" value={String(myPosts.length)} />
-            <StatCard label="Joined" value={String(joined.length)} />
+            <StatCard label="My posts" value={String(pages.posts?.total??myPosts.length)} />
+            <StatCard label="Joined" value={String(pages.joined?.total??joined.length)} />
             <StatCard label="Rating" value="4.8" />
           </div>
         </section>
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <Button onClick={() => {setProfile({name:currentUser.name,bio:currentUser.bio,age:String(currentUser.age??''),gender:currentUser.gender??'Prefer not to say',profilePhoto:currentUser.profilePhoto??'',profilePhotoName:currentUser.profilePhotoName??''});setEditOpen(true);}} variant="outline">
+          <Button disabled={!currentUser.id} onClick={() => {setProfile({name:currentUser.name,bio:currentUser.bio,age:String(currentUser.age??''),gender:currentUser.gender??'Prefer not to say',profilePhoto:currentUser.profilePhoto??'',profilePhotoName:currentUser.profilePhotoName??''});setEditOpen(true);}} variant="outline">
             <Pencil className="h-4 w-4" />
             Edit Profile
           </Button>
@@ -833,7 +836,7 @@ export function ProfileScreen() {
             <UserCheck className="h-4 w-4" />
             Verify Account
           </Button>
-          <Button onClick={() => {setPrivacy(currentUser.privacy);setPrivacyOpen(true);}} variant="outline">
+          <Button disabled={!currentUser.id} onClick={() => {setPrivacy(currentUser.privacy);setPrivacyOpen(true);}} variant="outline">
             <Settings className="h-4 w-4" />
             Privacy Settings
           </Button>
@@ -958,9 +961,10 @@ export function ProfileScreen() {
 }
 
 export function BusinessesScreen() {
-  const { state } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<(typeof businessCategories)[number]>("All");
+  const { state,setBusinessFilters } = useAppStore();
+  const [query, setQuery] = useFeedPreference<string>("business-query", "");
+  const [category, setCategory] = useFeedPreference<(typeof businessCategories)[number]>("business-category","All");
+  useEffect(()=>{setBusinessFilters(query,category);},[query,category,setBusinessFilters]);
   const locationName = getLocationName(state.location);
   const businesses = sortByNearbyRelevance(
     newestFirst(

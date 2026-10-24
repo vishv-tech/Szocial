@@ -18,6 +18,7 @@ export function canMessage(chats: Chat[], chat: Chat | undefined, senderId: stri
 
 export function unreadMessages(chat: Chat, participantId: string | null) {
   if (!participantId || !chat.participantIds.includes(participantId)) return 0;
+  if(chat.historyLoaded!==undefined)return chat.unread;
   const readAt = timestampToMilliseconds(chat.readAtByParticipant?.[participantId]);
   return chat.messages.filter(message => message.senderId !== participantId && message.kind !== "system" &&
     timestampToMilliseconds(message.createdAt) > readAt).length;

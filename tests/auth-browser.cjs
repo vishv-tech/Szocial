@@ -2,6 +2,8 @@
 const {chromium}=require('playwright'),{spawn}=require('node:child_process'),{createServer}=require('node:http'),fs=require('node:fs'),assert=require('node:assert/strict'),sharp=require('sharp');
 let server,app,browser,log,signupCount=0,resendCount=0,signupMode='pending';let emails=[];
 const base='http://localhost:3011',authBase='http://127.0.0.1:54330';
+const sessionUser={id:'55555555-5555-4555-8555-555555555555',aud:'authenticated',role:'authenticated',email:'authenticated@example.invalid',email_confirmed_at:new Date().toISOString(),created_at:new Date().toISOString(),app_metadata:{provider:'email'},user_metadata:{}};
+const sessionJwt=[{alg:'HS256',typ:'JWT'},{sub:sessionUser.id,exp:Math.floor(Date.now()/1000)+3600,aud:'authenticated',role:'authenticated'},'test-only-signature'].map((value,i)=>i===2?value:Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 (async()=>{try{
  server=createServer(async(req,res)=>{res.setHeader('Content-Type','application/json');
@@ -9,9 +11,17 @@ const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   if(req.url.startsWith('/auth/v1/signup')){signupCount++;let raw='';for await(const chunk of req)raw+=chunk;emails.push(JSON.parse(raw).email);await delay(350);
    if(signupMode==='rate'){res.statusCode=429;res.setHeader('Retry-After','240');return res.end(JSON.stringify({code:'over_email_send_rate_limit',msg:'Too many emails'}));}
    if(signupMode==='reject'){res.statusCode=400;return res.end(JSON.stringify({code:'email_address_invalid',msg:'Signup rejected by test provider'}));}
+   if(signupMode==='authenticated'){sessionUser.email=JSON.parse(raw).email;return res.end(JSON.stringify({access_token:sessionJwt,refresh_token:'test-only-refresh',token_type:'bearer',expires_in:3600,user:sessionUser}));}
    return res.end(JSON.stringify({id:'test-user',email:JSON.parse(raw).email,identities:[],created_at:new Date().toISOString()}));
   }
   if(req.url.startsWith('/auth/v1/resend')){resendCount++;return res.end('{}');}
+  if(signupMode==='authenticated'){
+   if(req.url.startsWith('/auth/v1/user'))return res.end(JSON.stringify(sessionUser));
+   const single=req.headers.accept?.includes('object'),respond=value=>res.end(JSON.stringify(single?value:[value]));
+   if(req.url.startsWith('/rest/v1/profiles'))return respond({id:sessionUser.id,full_name:'Authenticated resident',account_status:'Active',created_at:sessionUser.created_at});
+   if(req.url.startsWith('/rest/v1/profile_private'))return respond({user_id:sessionUser.id,onboarding_complete:false,location:{area:'',city:''}});
+   if(req.url.startsWith('/rest/v1/account_roles'))return res.end(JSON.stringify([{user_id:sessionUser.id,role:'resident'}]));
+  }
   res.end('[]');
  });await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(54330,'127.0.0.1',resolve);});
  log=fs.openSync('/tmp/szocial-auth-browser-server.log','w');app=spawn(process.execPath,['node_modules/next/dist/bin/next','dev','--hostname','127.0.0.1','--port','3011'],{stdio:['ignore',log,log],env:{...process.env,NEXT_PUBLIC_SUPABASE_URL:authBase,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'test-only-public',SUPABASE_SECRET_KEY:'',AUTH_RATE_LIMIT_SECRET:'test-only-cookie-encryption'}});
@@ -69,6 +79,13 @@ const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  signupMode='pending';await fillSignup('business@example.invalid',true);await page.getByRole('button',{name:'Create Business Account',exact:true}).click();await page.waitForURL('**/check-email');await page.getByRole('link',{name:'Return to login',exact:true}).waitFor();assert.ok((await page.getByRole('link',{name:'Return to login',exact:true}).getAttribute('href')).includes('/business/login'));assert.equal(emails.filter(email=>email==='business@example.invalid').length,1);
  console.log('PASS rejection, HTTP 429, provider cooldown and business confirmation intent');
  for(const path of ['/login','/signup','/business/login','/business/signup']){await visit(page,path);await page.getByText(/Google sign-in is not configured/).waitFor();assert.ok(page.url().endsWith(path));}console.log('PASS disabled social providers on all four auth screens');
+ // Session-available signup must replace an older anonymous bootstrap request,
+ // preserve its photo draft, and ignore a delayed 401 from before authentication.
+ signupMode='authenticated';let oldCoreStarted=false,releaseOldCore;const oldCore=new Promise(resolve=>{releaseOldCore=resolve;});
+ await page.route('**/api/app*',async route=>{if(route.request().method()==='GET'&&!oldCoreStarted){oldCoreStarted=true;await oldCore;try{await route.fulfill({status:401,json:{error:'Old anonymous request'}});}catch{}return;}await route.continue();});
+ await fillSignup('authenticated@example.invalid');await page.locator('input[type=file]').setInputFiles({name:'authenticated.png',mimeType:'image/png',buffer:fixtures.png});const use=page.getByRole('button',{name:'Use photo',exact:true});await use.waitFor();await page.waitForFunction(()=>!Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Use photo')?.disabled);await use.click();assert.equal(oldCoreStarted,true);
+ await page.getByRole('button',{name:'Signup',exact:true}).click();await page.waitForURL('**/onboarding');await page.getByRole('heading',{name:'Complete your profile',exact:true}).waitFor();await page.waitForFunction(()=>Array.from(document.querySelectorAll('input')).some(input=>input.value==='Signup Tester'));assert.equal(await page.getByLabel('City',{exact:true}).inputValue(),'Mumbai');assert.ok((await page.getByAltText('Selected profile photo',{exact:true}).getAttribute('src')).startsWith('data:image/jpeg'));
+ releaseOldCore();await delay(250);assert.equal(await page.getByLabel('Full name',{exact:true}).inputValue(),'Signup Tester');console.log('PASS authenticated signup replaces anonymous requests and preserves the cropped photo/setup draft');
  await context.close();
  }finally{if(browser)await browser.close();if(app)app.kill('SIGTERM');if(server)await new Promise(resolve=>server.close(resolve));if(log)fs.closeSync(log);}
 })().catch(error=>{console.error(error);process.exitCode=1;});

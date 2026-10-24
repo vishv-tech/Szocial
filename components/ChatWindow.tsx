@@ -45,6 +45,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
   const {
     blockChat,
     loadOlderMessages,
+    ensureChatHistory,setActiveThread,
     markChatRead,
     currentBusinessOwner,
     sendChatMessage,
@@ -58,6 +59,8 @@ export function ChatWindow({ chat }: ChatWindowProps) {
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const locationRequestActive = useRef(false);
 
+  useEffect(()=>{setActiveThread(chat?.id??null);return()=>setActiveThread(null);},[chat?.id,setActiveThread]);
+  useEffect(()=>{if(chat?.id&&!chat.historyLoaded)void ensureChatHistory(chat.id);},[chat?.id,chat?.historyLoaded,ensureChatHistory]);
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (chat?.id) markChatRead(chat.id);
@@ -288,7 +291,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
                   <p>{item.text}</p>
                 )}
                 <p className={cn("mt-1 text-[11px]", mine ? "text-white/70" : "text-szocial-muted")}>
-                  <RelativeTime timestamp={item.createdAt} />
+                  <RelativeTime timestamp={item.createdAt} /> {item.delivery==='pending'?<span>Sending…</span>:item.delivery==='failed'?<span>Not sent. Retry your draft below.</span>:null}
                 </p>
               </div>
             </div>

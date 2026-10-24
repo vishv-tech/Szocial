@@ -4,6 +4,9 @@ import { isSupabaseConfigured, supabaseConfig } from "@/lib/supabase/config";
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({request});
   response.headers.set("Cache-Control", "private, no-store");
+  // API handlers verify their own user/signature and can refresh their cookies.
+  // Avoid verifying the same API request a second time in middleware.
+  if(request.nextUrl.pathname.startsWith('/api/'))return response;
   const publicPath = /^\/(?:$|login|signup|check-email|forgot-password|reset-password|auth\/|api\/auth\/|admin\/login|business\/(login|signup))/.test(request.nextUrl.pathname);
   if (!isSupabaseConfigured()) {
     if (publicPath || request.nextUrl.pathname.startsWith('/api/')) return response;

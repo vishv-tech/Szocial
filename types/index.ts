@@ -49,6 +49,8 @@ export type PostComment = {
 };
 
 export type LocalPost = {
+  author?: PostAuthor;
+  people?: PostAuthor[];
   imagePaths?: string[];
   images?: string[];
   id: string;
@@ -122,6 +124,9 @@ export type BusinessOwner = {
 };
 
 export type Business = {
+  isSaved?: boolean;
+  detailsLoaded?: boolean;
+  analyticsLoaded?: boolean;
   id: string;
   ownerId: string;
   name: string;
@@ -160,6 +165,8 @@ export type Business = {
 export type ChatType = "Fun" | "Help" | "Business";
 
 export type ChatMessage = {
+  clientId?: string;
+  delivery?: "pending" | "failed";
   id: string;
   senderId: string;
   senderType?: "resident" | "business";
@@ -187,6 +194,7 @@ export type Chat = {
   avatar: string;
   location: string;
   status: "Active" | "Blocked" | "Left";
+  historyLoaded?: boolean;
   historyHasMore?: boolean;
   blockedByIds?: string[];
   blockedById?: string;
@@ -292,3 +300,8 @@ export type AppState = {
   currentBusinessOwnerId: string | null;
   location: LocationInfo;
 };
+
+/** Public identity needed to render a post; private profile fields stay out of feeds. */
+export type PostAuthor = Pick<ResidentUser, "id" | "name" | "avatarPath" | "profilePhoto" | "verified">;
+
+export type AdminStatistics={residents:number;businesses:number;posts:number;activeResidents:number;liveBusinesses:number;activePosts:number;openReports:number;pendingApprovals:number;reportedPosts:number;reportedUsers:number;revenue:number;paidListings:number;locationActivity:[string,number][];recentReports:{id:string;itemType:string;itemLabel:string;reason:string;createdAt:string}[];pendingBusinesses:{id:string;name:string;category:string;status:string;location:{area?:string;city?:string}}[]};

@@ -1,4 +1,5 @@
 "use client";
+import {ResourcePaging} from "@/components/ResourcePaging";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -92,7 +93,7 @@ export function BusinessLayout({ children }: { children: ReactNode }) {
             );
           })}
         </aside>
-        <section className="min-w-0 flex-1">{children}</section>
+        <section className="min-w-0 flex-1">{children}<ResourcePaging/></section>
       </div>
     </main>
   );

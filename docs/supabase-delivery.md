@@ -60,3 +60,8 @@ The Node 24 test subprocess runner in this environment initially reported only t
 5. Add Razorpay test-mode server credentials, `RAZORPAY_MODE=test`, webhook signing secret and the actual application's webhook URL. Test capture, receipt recovery, duplicate/out-of-order delivery, partial/full refunds and prepaid renewal against the provider. No payment transaction was made here. Automatic recurring Razorpay subscriptions are not configured; the application uses explicit prepaid renewals.
 6. Assign the first administrator role only to a deliberately selected, verified account through a trusted administrative process. No admin account or elevated role was created. Test positive admin moderation with isolated accounts; browser tests verify ordinary residents are denied.
 7. Hosted multi-account Auth/Storage/Realtime/OAuth/payment validation and deployment remain release blockers. Keep the PR in draft until these pass. Do not merge automatically or modify `main`/the previous feature branch.
+
+
+## Latest performance follow-up
+
+See [performance-optimization.md](performance-optimization.md) for targeted resources, quiet feed refresh, account isolation, complete before/after measurements and final regression results. The signup/photo follow-up is documented separately in [auth-signup-photo-fixes.md](auth-signup-photo-fixes.md). These follow-ups preserve the eight migration versions above.
