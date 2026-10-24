@@ -44,6 +44,7 @@ function getLocationErrorMessage(error: GeolocationPositionError) {
 export function ChatWindow({ chat }: ChatWindowProps) {
   const {
     blockChat,
+    loadOlderMessages,
     markChatRead,
     currentBusinessOwner,
     sendChatMessage,
@@ -99,19 +100,14 @@ export function ChatWindow({ chat }: ChatWindowProps) {
   );
   const otherParticipantPhoto =
     otherParticipant.profilePhoto || createInitialsAvatar(otherParticipant.name);
-  const currentParticipantType = currentBusinessOwner
-    ? "business"
-    : "resident";
   const isBlocked = chat.status === "Blocked";
   const blockedByCurrentParticipant =
     isBlocked &&
     Boolean(currentParticipantId) &&
-    chat.blockedById === currentParticipantId &&
-    chat.blockedByType === currentParticipantType;
+    (chat.blockedByIds??[chat.blockedById]).includes(currentParticipantId!);
   const canManageBlock =
     Boolean(currentParticipantId) &&
-    asArray(chat.participantIds).includes(currentParticipantId ?? "") &&
-    (chat.status === "Active" || blockedByCurrentParticipant);
+    asArray(chat.participantIds).includes(currentParticipantId ?? "");
   const canSendMessages = canMessage(state.chats, chat, currentParticipantId);
   const sendMessage = async () => {
     if(sendingRef.current)return;
@@ -229,6 +225,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
       </header>
 
       <div className="max-h-[520px] min-h-[420px] space-y-3 overflow-y-auto bg-szocial-mist p-4">
+        {chat.historyHasMore ? <Button variant="outline" onClick={()=>loadOlderMessages(chat.id)}>Load earlier messages</Button> : null}
         {orderedMessages(asArray(chat.messages)).map((item) => {
           const mine = isMessageFromCurrentUser(item, currentParticipantId);
           const sender = getChatParticipant(

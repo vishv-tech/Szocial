@@ -44,8 +44,7 @@ export function PostCard({ post }: PostCardProps) {
   const [reportOpen, setReportOpen] = useState(false);
   const author =
     asArray(state.residents).find((user) => user.id === post.authorId) ??
-    asArray(state.residents)[0] ??
-    currentUser;
+    {name:'Unavailable resident',verified:false};
   const postLocation = post.location ?? state.location;
   const isHelp = post.type === "help";
   const interested = asArray(post.interestedUserIds).includes(currentUser.id);
@@ -60,6 +59,7 @@ export function PostCard({ post }: PostCardProps) {
   return (
     <article className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-soft">
       <div className="p-5">
+        {post.images?.length?<div className="flex gap-2 overflow-x-auto">{post.images.map(image=><img key={image} alt={post.title} src={image} className="h-40 rounded-xl object-cover"/>)}</div>:null}
         <div className="flex items-start gap-3">
           <img
             alt={author.name}
@@ -200,8 +200,7 @@ export function PostCard({ post }: PostCardProps) {
               {asArray(post.comments).map((item) => {
                 const commenter =
                   asArray(state.residents).find((resident) => resident.id === item.userId) ??
-                  asArray(state.residents)[0] ??
-                  currentUser;
+                  {name:'Unavailable resident'};
                 return (
                   <div className="flex gap-3 rounded-xl bg-white p-3" key={item.id}>
                     <img
@@ -231,9 +230,8 @@ export function PostCard({ post }: PostCardProps) {
                 value={comment}
               />
               <Button
-                onClick={() => {
-                  addComment(post.id, comment);
-                  setComment("");
+                onClick={async () => {
+                  if(await addComment(post.id, comment)) setComment("");
                 }}
               >
                 Send

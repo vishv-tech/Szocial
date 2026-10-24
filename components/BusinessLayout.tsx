@@ -50,9 +50,8 @@ export function BusinessLayout({ children }: { children: ReactNode }) {
           </Link>
           <div className="flex items-center gap-2">
             <Button
-              onClick={() => {
-                markBusinessNotificationsRead();
-                router.push("/business/dashboard");
+              onClick={async () => {
+                if(await markBusinessNotificationsRead()) router.push("/business/dashboard");
               }}
               variant="outline"
             >
@@ -61,8 +60,7 @@ export function BusinessLayout({ children }: { children: ReactNode }) {
             </Button>
             <Button
               onClick={async () => {
-                await logoutBusiness();
-                router.push("/");
+                if(await logoutBusiness()) router.push("/");
               }}
               variant="outline"
             >

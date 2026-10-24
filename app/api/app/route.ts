@@ -1,3 +1,4 @@
+import { boundedJson } from '@/lib/request-body';
 import { NextResponse } from "next/server";
 import { authenticatedClient } from "@/lib/supabase/server";
 import { appSnapshot } from "@/lib/server-data";
@@ -12,7 +13,7 @@ export async function POST(request:Request) {
  try {
   const {client}=await authenticatedClient();
   if(Number(request.headers.get('content-length')??0)>100000)throw new Error('Request too large');
-  const {action,args}=await request.json();
+  const {action,args}=await boundedJson(request);
   if(typeof action!=='string'||!args||typeof args!=='object'||Array.isArray(args))throw new Error('Invalid action');
   const {data,error}=await client.rpc('app_mutate',{action,args});if(error)throw error;
   return NextResponse.json(data,{headers:{'Cache-Control':'no-store'}});

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
   CheckCircle2,
@@ -21,6 +21,8 @@ import {
   UsersRound
 } from "lucide-react";
 import { BusinessCard } from "@/components/BusinessCard";
+import { EntityImages } from "@/components/EntityImages";
+import { exportLegacyOwnPosts } from "@/lib/resident-auth";
 import { Button } from "@/components/Button";
 import { CategoryTabs } from "@/components/CategoryTabs";
 import { ChatList } from "@/components/ChatList";
@@ -164,7 +166,7 @@ function HomeRightPanel() {
 
 export function HomeScreen() {
   useFeedLocation();
-  const { state, currentUser, locationLabel } = useAppStore();
+  const { currentUser, locationLabel } = useAppStore();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<FeedSort>("nearby");
   const [tab, setTab] = useState<(typeof postTabs)[number]>("All");
@@ -335,12 +337,17 @@ export function CreatePostScreen() {
     return true;
   };
 
+  const [postImages,setPostImages]=useState<File[]>([]);
+  const [posting,setPosting]=useState(false);
+  const postLock=useRef(false);
   const submit = async () => {
+    if(postLock.current)return;
     if (!validate()) {
       notify({ title: "Please fill the required fields", variant: "warning" });
       return;
     }
-    if (!await createPost(buildInput())) return;
+    postLock.current=true;setPosting(true);
+    try{if (!await createPost(buildInput(),postImages)) return;}finally{postLock.current=false;setPosting(false);}
     router.push(mode === "help" ? "/help" : "/home");
   };
 
@@ -520,7 +527,8 @@ export function CreatePostScreen() {
               </label>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <Button onClick={submit}>
+              <label>Post images (up to 6)<input aria-label="Post images" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event=>{const files=Array.from(event.currentTarget.files??[]);if(files.length>6||files.some(f=>f.size>5*1024*1024)){notify({title:"Choose up to 6 images under 5 MB each",variant:"warning"});return;}setPostImages(files);}}/></label>
+              <Button disabled={posting} onClick={submit}>
                 <CirclePlus className="h-4 w-4" />
                 {mode === "help" ? "Post Help Request" : "Post Now"}
               </Button>
@@ -538,7 +546,7 @@ export function CreatePostScreen() {
 
 export function HelpScreen() {
   useFeedLocation();
-  const { state, currentUser, locationLabel } = useAppStore();
+  const { state, locationLabel } = useAppStore();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<(typeof helpTabs)[number]>("Need Help");
   const feed = useServerFeed(query,'nearby',tab==='Urgent'?'Urgent':'All','help',tab==='Solved'?'Solved':'Active');
@@ -637,7 +645,8 @@ export function ChatsScreen() {
 }
 
 export function MyPostsScreen() {
-  const { state, currentUser, deletePost, closePost, acceptInterestedUser, rejectInterestedUser } = useAppStore();
+  const router=useRouter();
+  const { state, currentUser, deletePost, closePost, updatePost, acceptInterestedUser, rejectInterestedUser } = useAppStore();
   const [tab, setTab] = useState<(typeof myPostTabs)[number]>("Active posts");
   const [interestedPost, setInterestedPost] = useState<LocalPost | null>(null);
   const ownPosts = newestFirst(
@@ -645,7 +654,7 @@ export function MyPostsScreen() {
   );
   const posts =
     tab === "Active posts"
-      ? ownPosts.filter(isPublishedActivePost)
+      ? ownPosts.filter(post=>isPublishedActivePost(post)||post.status==='Draft')
       : ownPosts.filter(isCompletedPost);
 
   return (
@@ -691,6 +700,8 @@ export function MyPostsScreen() {
                   </Button>
                 </div>
               </div>
+              <EntityImages label="Post images" scope="post" entityId={post.id} paths={post.imagePaths??[]} urls={post.images??[]} onSave={async paths=>Boolean(await updatePost(post.id,{images:paths}))}/>
+              {post.status==='Draft'?<Button onClick={()=>updatePost(post.id,{status:'Active'})}>Publish draft</Button>:null}
             </article>
           ))}
         </div>
@@ -719,7 +730,7 @@ export function MyPostsScreen() {
                   <p className="font-semibold text-szocial-ink">{user.name}</p>
                   <p className="text-sm text-szocial-muted">{user.location.area}</p>
                 </div>
-                <Button onClick={() => interestedPost && acceptInterestedUser(interestedPost.id, user.id)} size="sm">
+                <Button onClick={async () => {if(!interestedPost)return;const id=await acceptInterestedUser(interestedPost.id,user.id);if(id)router.push(`/chats?chatId=${id}`);}} size="sm">
                   Accept
                 </Button>
                 <Button onClick={() => interestedPost && rejectInterestedUser(interestedPost.id, user.id)} size="sm" variant="outline">
@@ -806,7 +817,7 @@ export function ProfileScreen() {
           </div>
         </section>
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <Button onClick={() => setEditOpen(true)} variant="outline">
+          <Button onClick={() => {setProfile({name:currentUser.name,bio:currentUser.bio,age:String(currentUser.age??''),gender:currentUser.gender??'Prefer not to say',profilePhoto:currentUser.profilePhoto??'',profilePhotoName:currentUser.profilePhotoName??''});setEditOpen(true);}} variant="outline">
             <Pencil className="h-4 w-4" />
             Edit Profile
           </Button>
@@ -814,18 +825,18 @@ export function ProfileScreen() {
             <MapPin className="h-4 w-4" />
             Change Location
           </Button>
+          <Button variant="outline" onClick={()=>{try{const posts=exportLegacyOwnPosts(currentUser.email);const url=URL.createObjectURL(new Blob([JSON.stringify(posts,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='szocial-legacy-posts.json';link.click();URL.revokeObjectURL(url);}catch(e){notify({title:'Export unavailable',description:e instanceof Error?e.message:'Could not export',variant:'warning'});}}}>Export old posts</Button>
           <Button onClick={submitVerification} variant="outline">
             <UserCheck className="h-4 w-4" />
             Verify Account
           </Button>
-          <Button onClick={() => setPrivacyOpen(true)} variant="outline">
+          <Button onClick={() => {setPrivacy(currentUser.privacy);setPrivacyOpen(true);}} variant="outline">
             <Settings className="h-4 w-4" />
             Privacy Settings
           </Button>
           <Button
             onClick={async () => {
-              await logoutResident();
-              router.push("/");
+              if(await logoutResident()) router.push("/");
             }}
             variant="secondary"
           >
@@ -864,6 +875,7 @@ export function ProfileScreen() {
               />
             </span>
           </label>
+          <Button variant="outline" onClick={()=>setProfile({...profile,profilePhoto:"",profilePhotoName:""})}>Remove photo</Button>
           <input className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal" onChange={(event) => setProfile({ ...profile, name: event.target.value })} value={profile.name} />
           <textarea className="min-h-24 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal" onChange={(event) => setProfile({ ...profile, bio: event.target.value })} value={profile.bio} />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -875,16 +887,15 @@ export function ProfileScreen() {
           <Button
             className="w-full"
             onClick={async () => {
-              await updateResidentProfile({
+              if(await updateResidentProfile({
                 name: profile.name,
                 bio: profile.bio,
                 age: profile.age ? Number(profile.age) : undefined,
                 gender: profile.gender as ResidentUser["gender"],
-                profilePhoto: profile.profilePhoto || undefined,
+                profilePhoto: profile.profilePhoto || "",
                 profilePhotoName: profile.profilePhotoName || undefined,
                 updatedAt: new Date().toISOString()
-              });
-              setEditOpen(false);
+              })) setEditOpen(false);
             }}
           >
             Save profile
@@ -906,10 +917,7 @@ export function ProfileScreen() {
             ...current,
             ...nextPhoto
           }));
-          await updateResidentProfile({
-            ...nextPhoto,
-            updatedAt: new Date().toISOString()
-          });
+
           setPendingPhoto(null);
         }}
         open={Boolean(pendingPhoto)}
@@ -933,9 +941,8 @@ export function ProfileScreen() {
           ))}
           <Button
             className="w-full"
-            onClick={() => {
-              updatePrivacy(privacy);
-              setPrivacyOpen(false);
+            onClick={async () => {
+              if(await updatePrivacy(privacy)) setPrivacyOpen(false);
             }}
           >
             Save settings

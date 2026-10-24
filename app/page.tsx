@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  BadgeCheck,
   Building2,
   Coffee,
   Compass,
@@ -196,31 +195,5 @@ export default function LandingPage() {
         </div>
       </footer>
     </main>
-  );
-}
-
-function PhonePreviewCard({
-  badge,
-  title,
-  text
-}: {
-  badge: string;
-  title: string;
-  text: string;
-}) {
-  return (
-    <article className="mt-3 rounded-3xl bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold text-szocial-ink">{title}</h3>
-        <span className="rounded-full bg-szocial-orangeSoft px-3 py-1 text-xs font-bold text-szocial-orange">
-          {badge}
-        </span>
-      </div>
-      <p className="mt-2 text-sm leading-6 text-szocial-muted">{text}</p>
-      <div className="mt-3 flex items-center gap-2 text-xs font-semibold text-szocial-teal">
-        <UsersRound className="h-4 w-4" />
-        Interested neighbours nearby
-      </div>
-    </article>
   );
 }

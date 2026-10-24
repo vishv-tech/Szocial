@@ -455,7 +455,7 @@ export function BusinessSignupScreen() {
             Business login
           </Link>
         </p>
-        <SocialAuthButtons />
+        <SocialAuthButtons business />
       </div>
     </AuthLayout>
   );
@@ -491,7 +491,7 @@ export function BusinessLoginScreen() {
             Create business account
           </Link>
         </p>
-        <SocialAuthButtons />
+        <SocialAuthButtons business />
       </div>
     </AuthLayout>
   );

@@ -39,8 +39,7 @@ export function LocationModal({ open, onClose }: LocationModalProps) {
         coordinates.longitude
       );
       setLocalLocation(detected);
-      setLocation(detected);
-      onClose();
+      if(await setLocation(detected)) onClose();
     } catch (error) {
       setManual(true);
       notify({
@@ -93,7 +92,7 @@ export function LocationModal({ open, onClose }: LocationModalProps) {
           ))}
           <Button
             className="w-full"
-            onClick={() => {
+            onClick={async () => {
               const manualLocation = createManualLocation(location);
               if (!manualLocation) {
                 notify({
@@ -103,8 +102,7 @@ export function LocationModal({ open, onClose }: LocationModalProps) {
                 });
                 return;
               }
-              setLocation(manualLocation);
-              onClose();
+              if(await setLocation(manualLocation)) onClose();
             }}
           >
             Save location

@@ -1,3 +1,5 @@
+> Resumed delivery: see [supabase-delivery.md](supabase-delivery.md) for the current implementation, eight applied migrations, test results and external blockers. The historical checkpoint below is retained for context. The latest user instruction prohibits destructive tests on the main hosted Szocial database and repeated SQL approval attempts; use isolated local tests and read-only hosted checks.
+
 # Supabase integration handoff — work in progress
 
 ## User-directed pause

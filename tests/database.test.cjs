@@ -88,7 +88,7 @@ test('business ownership and role are created transactionally; other accounts ca
 });
 test('prices are server controlled and clients cannot finalize or read others payments',async()=>{
  await assert.rejects(as(a,"select public.reserve_payment($1,'starter',$2,'test')",[business,'ffffffff-ffff-4fff-8fff-ffffffffffff']),/Not your business/);
- const [reserved]=await as(c,"select (public.reserve_payment($1,'starter',$2,'test')).*",[business,'ffffffff-ffff-4fff-8fff-ffffffffffff']);assert.equal(reserved.amount_paise,49900);
+ const [reserved]=await as(c,"select (public.reserve_payment($1,'starter',$2,'test')).*",[business,'ffffffff-ffff-4fff-8fff-ffffffffffff']);assert.equal(reserved.amount_paise,9900);
  await assert.rejects(as(c,"select public.finalize_payment('order','payment',1,'test')"),/permission denied/);
  await assert.rejects(as(c,"update public.payments set status='paid'"),/permission denied/);
  assert.equal((await as(a,'select * from public.payments')).length,0);
@@ -101,4 +101,99 @@ test('notification read is scoped to the recipient and client cannot forge notif
 test('all exposed tables have RLS and anonymous users cannot read application records',async()=>{
  const rows=(await db.query("select relname,relrowsecurity from pg_class join pg_namespace n on n.oid=relnamespace where n.nspname='public' and relkind='r'")).rows;
  assert.ok(rows.every(r=>r.relrowsecurity));await db.exec('begin; set local role anon;');try{await assert.rejects(db.query('select * from public.posts'),/permission denied/);}finally{await db.exec('rollback');}
+});
+test('media references require the same owner, scope and entity; detached images stay private',async()=>{
+ const ownPath=a+'/profile/avatar.webp',otherPath=b+'/profile/avatar.webp';
+ await db.query("insert into public.media(owner_id,bucket,path,scope) values($1,'szocial-avatars',$2,'avatar'),($3,'szocial-avatars',$4,'avatar')",[a,ownPath,b,otherPath]);
+ await mutate(a,'profile',{profilePhoto:ownPath});
+ await assert.rejects(mutate(a,'profile',{profilePhoto:otherPath}),/unowned image/);
+ assert.equal((await as(c,'select path from public.media where path=$1',[otherPath])).length,0);
+ assert.equal((await as(c,'select path from public.media where path=$1',[ownPath])).length,1);
+ await assert.rejects(db.query('delete from public.media where path=$1',[ownPath]),/still referenced/);
+ await mutate(a,'profile',{profilePhoto:''});
+ assert.equal((await as(c,'select path from public.media where path=$1',[ownPath])).length,0);
+ await db.query('delete from public.media where path=$1',[ownPath]);
+ await assert.rejects(mutate(a,'update_post',{id:normal,images:[otherPath]}),/unowned image/);
+});
+test('untrusted metadata and precise coordinates cannot bypass column ownership or location checks',async()=>{
+ await mutate(a,'update_post',{id:normal,authorId:b,status:'Active',images:[],savedByUserIds:[c],__dangerous:'value'});
+ const [p]=await as(a,'select * from public.posts where id=$1',[normal]);assert.equal(p.author_id,a);assert.equal(p.data.__dangerous,undefined);
+ await assert.rejects(mutate(a,'profile',{privacy:{allowDirectMessages:'false'}}),/Invalid privacy/);
+ await assert.rejects(mutate(a,'profile',{location:{latitude:91,longitude:0}}),/Invalid coordinates/);
+ await assert.rejects(mutate(a,'message',{id:chat,kind:'location',text:'Invalid',clientId:'aaaabbbb-1111-4111-8111-111111111111'}),/coordinates/);
+});
+test('Help closes into Solved and image uploads can start as a private draft',async()=>{
+ await mutate(a,'close_post',{id:help});assert.equal((await as(b,"select * from public.discover_posts(post_status=>'Solved') where id=$1",[help])).length,1);
+ const draft=(await mutate(a,'create_post',{type:'fun',category:'Other',title:'Private upload draft',withImages:true})).id;
+ assert.equal((await as(a,'select status from public.posts where id=$1',[draft]))[0].status,'Draft');
+ assert.equal((await as(b,'select id from public.posts where id=$1',[draft])).length,0);
+});
+test('acceptance creates shared chat and persists a recipient notification',async()=>{
+ await mutate(c,'interest',{id:normal});const accepted=await mutate(a,'accept',{id:normal,userId:c});
+ assert.equal((await as(c,'select id from public.conversations where id=$1',[accepted.id])).length,1);
+ assert.ok((await as(c,"select id from public.notifications where type='accepted'")).length>0);
+});
+test('both participants can block independently and each removes only their own block',async()=>{
+ await mutate(a,'block',{id:chat,blocked:true});await mutate(b,'block',{id:chat,blocked:true});
+ assert.equal((await as(a,'select * from public.blocks')).length,2);
+ await mutate(a,'block',{id:chat,blocked:false});
+ await assert.rejects(mutate(a,'message',{id:chat,text:'Still blocked',clientId:'aaaaaaaa-2222-4222-8222-222222222222'}),/Messaging unavailable/);
+ await mutate(b,'block',{id:chat,blocked:false});
+});
+test('inactive accounts cannot read any private data or receive new messages',async()=>{
+ await db.query("update public.profiles set account_status='Banned' where id=$1",[b]);
+ for(const table of ['profile_private','account_roles','blocks','notifications','messages','payments'])assert.equal((await as(b,'select * from public.'+table)).length,0,table);
+ await assert.rejects(mutate(a,'message',{id:chat,text:'Banned peer',clientId:'aaaaaaaa-3333-4333-8333-333333333333'}),/Messaging unavailable/);
+ await db.query("update public.profiles set account_status='Active' where id=$1",[b]);
+});
+test('captured payments, renewals, partial refunds and full refunds are idempotent',async()=>{
+ const [p]=(await db.query('select * from public.payments where business_id=$1',[business])).rows;
+ await db.query("update public.payments set razorpay_order_id='order_test' where id=$1",[p.id]);
+ await db.query("select public.reconcile_payment('order_test','pay_test',9900,'test',0)");
+ const [first]=(await db.query('select * from public.subscriptions where business_id=$1',[business])).rows;
+ await db.query("select public.reconcile_payment('order_test','pay_test',9900,'test',0)");
+ assert.equal((await db.query('select active_until from public.subscriptions where business_id=$1',[business])).rows[0].active_until.getTime(),first.active_until.getTime());
+ await db.query("select public.reconcile_payment('order_test','pay_test',9900,'test',500)");
+ assert.equal((await db.query('select refunded_paise from public.payments where id=$1',[p.id])).rows[0].refunded_paise,500);
+ assert.ok((await db.query('select active_until>now() as active from public.subscriptions where business_id=$1',[business])).rows[0].active);
+ await assert.rejects(as(c,"select public.reconcile_payment('order_test','pay_test',9900,'test',9900)"),/permission denied/);
+ await assert.rejects(db.query("select public.reconcile_payment('order_test','other_pay',9900,'test',0)"),/already reconciled/);
+ await assert.rejects(db.query("select public.reconcile_payment('order_test','pay_test',1,'test',0)"),/does not match/);
+ await db.query("select public.reconcile_payment('order_test','pay_test',9900,'test',9900)");
+ await db.query("select public.reconcile_payment('order_test','pay_test',9900,'test',9900)");
+ assert.equal((await db.query('select status from public.payments where id=$1',[p.id])).rows[0].status,'refunded');
+ assert.equal((await db.query('select active_until>now() as active from public.subscriptions where business_id=$1',[business])).rows[0].active,false);
+});
+test('business offer edits persist actual rows and malformed listing collections are rejected',async()=>{
+ await mutate(c,'business_profile',{id:business,offers:['First offer','Second offer'],services:['Coffee']});
+ assert.equal((await as(c,'select * from public.business_offers where business_id=$1',[business])).length,2);
+ await mutate(c,'business_profile',{id:business,offers:['Second offer']});
+ assert.equal((await as(c,'select * from public.business_offers where business_id=$1',[business])).length,1);
+ await assert.rejects(mutate(c,'business_profile',{id:business,services:'not an array'}),/Invalid listing/);
+ await assert.rejects(mutate(a,'business_profile',{id:business,offers:[]}),/Not your business/);
+});
+test('repeated acceptance returns the same chat without duplicate notifications',async()=>{
+ const before=(await as(c,"select * from public.notifications where type='accepted'")).length;
+ const first=await mutate(a,'accept',{id:normal,userId:c});const second=await mutate(a,'accept',{id:normal,userId:c});assert.equal(first.id,second.id);
+ assert.equal((await as(c,"select * from public.notifications where type='accepted'")).length,before);
+});
+test('an expired listing is hidden and cannot receive a new business conversation',async()=>{
+ await db.query("update public.businesses set status='Live' where id=$1",[business]);
+ assert.equal((await as(a,'select id from public.businesses where id=$1',[business])).length,0);
+ await assert.rejects(mutate(a,'start_chat',{businessId:business}),/subscription expired/);
+});
+test('purchase retries reuse pending reservations and cannot change payment environment',async()=>{
+ const [first]=await as(c,"select (public.reserve_payment($1,'growth',$2,'test')).*",[business,'dddddddd-1111-4111-8111-111111111111']);
+ const [second]=await as(c,"select (public.reserve_payment($1,'growth',$2,'test')).*",[business,'dddddddd-2222-4222-8222-222222222222']);assert.equal(first.id,second.id);
+ await assert.rejects(as(c,"select public.reserve_payment($1,'growth',$2,'live')",[business,'dddddddd-1111-4111-8111-111111111111']),/another purchase/);
+});
+test('refunding an earlier prepaid renewal preserves the later paid entitlement',async()=>{
+ const purchase=async(key,order)=>{const [p]=await as(c,"select (public.reserve_payment($1,'starter',$2,'test')).*",[business,key]);await db.query('update public.payments set razorpay_order_id=$1 where id=$2',[order,p.id]);await db.query('select public.reconcile_payment($1,$2,9900,\'test\',0)',[order,'pay_'+order]);return p;};
+ await purchase('eeeeeeee-1111-4111-8111-111111111111','renewal_one');await purchase('eeeeeeee-2222-4222-8222-222222222222','renewal_two');
+ const before=(await db.query('select active_until from public.subscriptions where business_id=$1',[business])).rows[0].active_until;
+ await db.query("select public.reconcile_payment('renewal_one','pay_renewal_one',9900,'test',9900)");
+ const after=(await db.query('select active_until from public.subscriptions where business_id=$1',[business])).rows[0].active_until;
+ assert.ok(after<before);assert.ok(after>Date.now()+29*86400000);
+ await db.query("select public.reconcile_payment('renewal_one','pay_renewal_one',9900,'test',9900)");
+ assert.equal((await db.query('select active_until from public.subscriptions where business_id=$1',[business])).rows[0].active_until.getTime(),after.getTime());
 });

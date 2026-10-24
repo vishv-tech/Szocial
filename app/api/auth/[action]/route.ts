@@ -1,3 +1,4 @@
+import { boundedJson } from '@/lib/request-body';
 import { NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/supabase/server";
 import { passwordError, sameOrigin } from "@/lib/auth-security";
@@ -5,7 +6,7 @@ export async function POST(request:Request,{params}:{params:Promise<{action:stri
   if (!sameOrigin(request)) return NextResponse.json({error:'Invalid origin'},{status:403});
   try {
     const {action}=await params, client=await serverSupabase();
-    const body=await request.json();
+    const body=await boundedJson(request);
     const origin=new URL(request.url).origin;
     const email=typeof body.email==='string'?body.email.trim():'';
     let error;

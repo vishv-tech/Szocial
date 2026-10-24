@@ -1,3 +1,4 @@
+import { boundedJson } from '@/lib/request-body';
 import { NextResponse } from 'next/server';
 import { authenticatedClient } from '@/lib/supabase/server';
 import { adminSupabase } from '@/lib/supabase/admin';
@@ -6,7 +7,7 @@ import { sameOrigin } from '@/lib/auth-security';
 export async function POST(request:Request){
  if(!sameOrigin(request))return NextResponse.json({error:'Invalid origin'},{status:403});
  try {
-  const {client}=await authenticatedClient(),{planId,businessId,idempotencyKey}=await request.json(),{keyId,mode}=paymentConfiguration();
+  const {client}=await authenticatedClient(),{planId,businessId,idempotencyKey}=await boundedJson(request),{keyId,mode}=paymentConfiguration();
   if(!/^[0-9a-f-]{36}$/i.test(String(idempotencyKey)))throw new Error('A valid idempotency key is required');
   // The database determines amount and checks ownership. Any client amount is ignored.
   const {data:purchase,error}=await client.rpc('reserve_payment',{business:businessId,plan:planId,request_key:idempotencyKey,payment_mode:mode});if(error)throw error;

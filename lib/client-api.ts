@@ -10,3 +10,8 @@ export async function uploadImage(source:File|string,scope:'avatar'|'business'|'
  form.set('file',file,'image.webp');form.set('scope',scope);if(entityId)form.set('entityId',entityId);
  const response=await fetch('/api/uploads',{method:'POST',body:form});const result=await response.json();if(!response.ok)throw new Error(result.error??'Image upload failed');return result.path as string;
 }
+
+export async function deleteImage(path:string){
+ const response=await fetch('/api/uploads',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});
+ if(!response.ok)throw new Error('Image cleanup failed');
+}

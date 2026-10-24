@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { PaymentLedger } from "@/components/PaymentLedger";
 import { useMemo, useState } from "react";
 import {
   BadgeCheck,
@@ -392,6 +393,7 @@ export function AdminBusinessesScreen() {
           {!businesses.length ? <EmptyAdminState message="No business listings." /> : null}
         </div>
       </AdminPanel>
+      <PaymentLedger />
       <Modal onClose={() => setSelectedBusiness(null)} open={Boolean(selectedBusiness)} title="Business details">
         {selectedBusiness ? (
           <div className="space-y-3 rounded-2xl bg-szocial-mist p-4 text-sm text-szocial-muted">

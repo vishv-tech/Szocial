@@ -14,11 +14,12 @@ import {
   PauseCircle,
   Rocket,
   Store,
-  Upload,
   XCircle
 } from "lucide-react";
 import { BusinessCard } from "@/components/BusinessCard";
 import { BusinessLayout } from "@/components/BusinessLayout";
+import { PaymentLedger } from "@/components/PaymentLedger";
+import { EntityImages } from "@/components/EntityImages";
 import { Button } from "@/components/Button";
 import { ChatList } from "@/components/ChatList";
 import { ChatWindow } from "@/components/ChatWindow";
@@ -123,6 +124,8 @@ export function BusinessPricingScreen() {
     if(openingCheckout.current)return;
     openingCheckout.current=true;
     setBusyPlan(plan.id);
+    let checkoutOpened=false;
+    const releaseCheckout=()=>{openingCheckout.current=false;setBusyPlan(null);};
     try {
       const response = await fetch("/api/razorpay/create-order", {
         method: "POST",
@@ -151,6 +154,7 @@ export function BusinessPricingScreen() {
           razorpay_payment_id: string;
           razorpay_signature: string;
         }) => {
+          try{
           const verify = await fetch("/api/razorpay/verify-payment", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -162,16 +166,19 @@ export function BusinessPricingScreen() {
           });
           const result = await verify.json();
           if (result.success) {
-            await completeBusinessPayment(plan, paymentResponse.razorpay_payment_id, Boolean(result.mock));
+            await completeBusinessPayment();
             router.push("/business/setup");
           } else {
-            failBusinessPayment(plan);
+            await failBusinessPayment();
             router.push("/business/payment-failed");
           }
+          }catch(error){notify({title:"Payment verification pending",description:error instanceof Error?error.message:"Use Reconcile in payment records before paying again.",variant:"warning"});}
+          finally{releaseCheckout();}
         },
         modal: {
           ondismiss: () => {
-            failBusinessPayment(plan);
+            releaseCheckout();
+            void failBusinessPayment();
             router.push("/business/payment-failed");
           }
         },
@@ -183,12 +190,11 @@ export function BusinessPricingScreen() {
           color: "#F97316"
         }
       });
-      checkout.open();
+      checkout.open();checkoutOpened=true;
     } catch(error) {
       notify({ title: "Payment unavailable", description: error instanceof Error?error.message:'Please try again.', variant: "warning" });
     } finally {
-      openingCheckout.current=false;
-      setBusyPlan(null);
+      if(!checkoutOpened)releaseCheckout();
     }
   };
 
@@ -325,6 +331,7 @@ function BusinessProfileForm({ mode }: { mode: "setup" | "profile" }) {
     currentBusinessOwner,
     hydrated,
     updateBusinessProfile,
+    saveBusinessMedia,
     publishBusiness,
     getBusinessNextRoute
   } = useAppStore();
@@ -370,6 +377,13 @@ function BusinessProfileForm({ mode }: { mode: "setup" | "profile" }) {
       router.replace("/business/pricing?message=Please choose a listing plan to continue.");
     }
   }, [currentBusinessOwner, hydrated, mode, notify, router]);
+
+  const loadedBusiness=useRef('');
+  useEffect(()=>{
+    if(!currentBusiness||loadedBusiness.current===currentBusiness.id)return;
+    loadedBusiness.current=currentBusiness.id;
+    setForm(current=>({...current,name:currentBusiness.name,category:currentBusiness.category,address:currentBusiness.address,city:currentBusiness.location.city??'',area:currentBusiness.location.area??'',landmark:currentBusiness.location.landmark??'',mapsLink:currentBusiness.mapsLink??'',hours:currentBusiness.hours,phone:currentBusiness.phone,whatsapp:currentBusiness.whatsapp??'',about:currentBusiness.about,services:currentBusiness.services.join(', '),offers:currentBusiness.offers.join(', '),priceRange:currentBusiness.priceRange,tags:currentBusiness.tags.join(', ')}));
+  },[currentBusiness]);
 
   const save = async () => {
     if (!form.name || !form.category || !form.address || !form.phone || !form.about) {
@@ -437,32 +451,11 @@ function BusinessProfileForm({ mode }: { mode: "setup" | "profile" }) {
             </select>
           </label>
           <Field label="Business tags" onChange={(value) => setForm({ ...form, tags: value })} placeholder="Coffee, New nearby" value={form.tags} />
-          {[
-            ["Logo upload placeholder", "logoName"],
-            ["Cover image upload placeholder", "coverName"],
-            ["Multiple shop images placeholder", "photosName"]
-          ].map(([label, key]) => (
-            <label className="rounded-2xl border border-dashed border-slate-200 p-4" key={key}>
-              <span className="flex items-center gap-2 text-sm font-semibold text-szocial-ink">
-                <Upload className="h-4 w-4" />
-                {label}
-              </span>
-              <input
-                className="mt-2 block w-full text-sm text-szocial-muted"
-                multiple={key === "photosName"}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    [key]: event.target.files?.[0]?.name ?? "No file selected"
-                  })
-                }
-                type="file"
-              />
-              <span className="mt-2 block text-xs text-szocial-muted">
-                {form[key as "logoName" | "coverName" | "photosName"]}
-              </span>
-            </label>
-          ))}
+          {currentBusiness ? <div className="space-y-3 md:col-span-2">
+            <EntityImages label="Business logo" scope="business" entityId={currentBusiness.id} paths={currentBusiness.mediaPaths?.logo?[currentBusiness.mediaPaths.logo]:[]} urls={[currentBusiness.logo]} max={1} onSave={paths=>saveBusinessMedia({logo:paths[0]??''})}/>
+            <EntityImages label="Cover image" scope="business" entityId={currentBusiness.id} paths={currentBusiness.mediaPaths?.coverImage?[currentBusiness.mediaPaths.coverImage]:[]} urls={[currentBusiness.coverImage]} max={1} onSave={paths=>saveBusinessMedia({coverImage:paths[0]??''})}/>
+            <EntityImages label="Shop gallery" scope="business" entityId={currentBusiness.id} paths={currentBusiness.mediaPaths?.gallery??[]} urls={currentBusiness.gallery} max={12} onSave={paths=>saveBusinessMedia({gallery:paths})}/>
+          </div>:null}
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           <Button
@@ -688,6 +681,7 @@ export function BusinessDashboardScreen() {
           </aside>
         </section>
       </div>
+      <PaymentLedger />
       <Modal onClose={() => setHistoryOpen(false)} open={historyOpen} title="Payment history">
         <div className="space-y-3">
           {asArray(rows).map((row) => (
@@ -717,7 +711,7 @@ export function BusinessDashboardScreen() {
       </Modal>
       <Modal onClose={() => setCancelOpen(false)} open={cancelOpen} title="Cancel subscription">
         <p className="text-sm leading-6 text-szocial-muted">This mock action pauses your listing and marks the plan cancelled.</p>
-        <Button className="mt-5 w-full" onClick={() => { cancelBusinessPlan(); setCancelOpen(false); }} variant="secondary">
+        <Button className="mt-5 w-full" onClick={async () => { if(await cancelBusinessPlan()) setCancelOpen(false); }} variant="secondary">
           Confirm cancel
         </Button>
       </Modal>
@@ -735,7 +729,7 @@ export function BusinessMessagesScreen() {
         timestampToMilliseconds(left.lastMessageAt)
     );
   const [activeChatId, setActiveChatId] = useState(chats[0]?.id ?? null);
-  const activeChat = chats.find((chat) => chat.id === activeChatId) ?? null;
+  const activeChat = chats.find((chat) => chat.id === activeChatId) ?? chats[0] ?? null;
 
   return (
     <BusinessLayout>
@@ -760,7 +754,7 @@ export function BusinessOffersScreen() {
         <p className="mt-2 text-szocial-muted">Add discounts that appear on your listing.</p>
         <div className="mt-5 flex gap-2">
           <input className="min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal" onChange={(event) => setOffer(event.target.value)} placeholder="10% off on first visit" value={offer} />
-          <Button onClick={() => { addBusinessOffer(offer); setOffer(""); }}>Add Offer</Button>
+          <Button onClick={async () => { if(await addBusinessOffer(offer)) setOffer(""); }}>Add Offer</Button>
         </div>
         <div className="mt-5 space-y-3">
           {asArray(currentBusiness?.offers).map((item) => (
