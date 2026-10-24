@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
   CheckCircle2,
@@ -21,6 +21,8 @@ import {
   UsersRound
 } from "lucide-react";
 import { BusinessCard } from "@/components/BusinessCard";
+import { EntityImages } from "@/components/EntityImages";
+import { exportLegacyOwnPosts } from "@/lib/resident-auth";
 import { Button } from "@/components/Button";
 import { CategoryTabs } from "@/components/CategoryTabs";
 import { ChatList } from "@/components/ChatList";
@@ -40,8 +42,11 @@ import { StatCard } from "@/components/StatCard";
 import { useAppStore } from "@/components/AppStoreProvider";
 import { useToast } from "@/components/ToastProvider";
 import type { LocalPost, LocationInfo, ResidentUser } from "@/types";
-import { discoveryPosts, queryPosts, type FeedSort } from "@/lib/feed";
+import { type FeedSort } from "@/lib/feed";
 import { useFeedLocation } from "@/components/useFeedLocation";
+import { api } from "@/lib/client-api";
+import { useServerFeed, useFeedPreference } from "@/components/useServerFeed";
+import { FeedPaging } from "@/components/FeedPaging";
 import { FeedSortControl } from "@/components/FeedSortControl";
 import { getLocationName } from "@/lib/location";
 import { sortByNearbyRelevance } from "@/lib/nearby-ranking";
@@ -79,9 +84,6 @@ function textMatch(text: string, query: string) {
   return text.toLowerCase().includes(query.trim().toLowerCase());
 }
 
-function filterPosts(posts: LocalPost[], query: string) {
-  return queryPosts(posts, query, "newest", { area: "", city: "" });
-}
 
 type LegacyPostOwnerFields = LocalPost & {
   creatorId?: string;
@@ -165,21 +167,14 @@ function HomeRightPanel() {
 
 export function HomeScreen() {
   useFeedLocation();
-  const { state, currentUser, locationLabel } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<FeedSort>("nearby");
-  const [tab, setTab] = useState<(typeof postTabs)[number]>("All");
+  const { currentUser, locationLabel } = useAppStore();
+  const [query, setQuery] = useFeedPreference<string>("home-query", "");
+  const [sort, setSort] = useFeedPreference<FeedSort>("home-sort","nearby");
+  const [tab, setTab] = useFeedPreference<(typeof postTabs)[number]>("home-tab","All");
   const [locationOpen, setLocationOpen] = useState(false);
 
-  const posts = useMemo(() => {
-    let filtered = filterPosts(
-      discoveryPosts(asArray(state.posts), currentUser.id, state.chats),
-      query
-    );
-    if (tab === "Fun") filtered = filtered.filter((post) => post.type === "fun");
-    if (tab === "Help") filtered = filtered.filter((post) => post.type === "help");
-    return queryPosts(filtered, query, sort, state.location);
-  }, [currentUser.id, query, state.location, state.posts, state.chats, sort, tab]);
+  const feed = useServerFeed(query,sort,'All',tab==='Fun'?'fun':tab==='Help'?'help':undefined);
+  const posts = feed.posts;
 
   return (
     <ResidentShell rightPanel={<HomeRightPanel />}>
@@ -210,14 +205,15 @@ export function HomeScreen() {
               <PostCard key={post.id} post={post} />
             ))}
           </div>
-        ) : (
+        ) : !feed.loading && !feed.error ? (
           <EmptyState
             action={<Button href="/post">Create a post</Button>}
             description="Try another search or start a new local plan."
             icon={<Search className="h-6 w-6" />}
             title="No local posts found"
           />
-        )}
+        ) : null}
+        <FeedPaging {...feed} />
       </div>
       <LocationModal onClose={() => setLocationOpen(false)} open={locationOpen} />
     </ResidentShell>
@@ -227,24 +223,12 @@ export function HomeScreen() {
 export function ExploreScreen() {
   useFeedLocation();
   const { state, currentUser, locationLabel } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<FeedSort>("nearby");
-  const [category, setCategory] = useState<(typeof exploreCategories)[number]>("All");
+  const [query, setQuery] = useFeedPreference<string>("explore-query", "");
+  const [sort, setSort] = useFeedPreference<FeedSort>("explore-sort","nearby");
+  const [category, setCategory] = useFeedPreference<(typeof exploreCategories)[number]>("explore-category","All");
 
-  const featuredPosts = useMemo(() => {
-    let posts = filterPosts(
-      discoveryPosts(asArray(state.posts), currentUser.id, state.chats),
-      query
-    );
-    if (category === "Sports") posts = posts.filter((post) => ["Cricket", "Football", "Badminton", "Gym"].includes(post.category));
-    if (category === "Food") posts = posts.filter((post) => ["Cafe", "Food", "Restaurant"].includes(post.category));
-    if (category === "Movies") posts = posts.filter((post) => post.category === "Movie");
-    if (category === "Adventure") posts = posts.filter((post) => post.category === "Hiking");
-    if (category === "Study") posts = posts.filter((post) => ["Study", "Tutor"].includes(post.category));
-    if (category === "Help") posts = posts.filter((post) => post.type === "help");
-    return queryPosts(posts, query, sort, state.location);
-  }, [category, currentUser.id, query, state.location, state.posts, state.chats, sort]);
-
+  const feed = useServerFeed(query,sort,category);
+  const featuredPosts = feed.posts;
 
   return (
     <ResidentShell>
@@ -270,7 +254,7 @@ export function ExploreScreen() {
           </div>
         </section>
 
-        {!featuredPosts.length ? <EmptyState title="No posts found" description="Try another location or keyword." icon={<Search className="h-6 w-6" />} /> : null}
+        {!featuredPosts.length && !feed.loading && !feed.error ? <EmptyState title="No posts found" description="Try another location or keyword." icon={<Search className="h-6 w-6" />} /> : null}
         {!query.trim() ? <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-soft">
           <h2 className="text-xl font-bold text-szocial-ink">Recommended neighbours</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -283,6 +267,7 @@ export function ExploreScreen() {
               </div>)}
           </div>
         </section> : null}
+        <FeedPaging {...feed} />
       </div>
     </ResidentShell>
   );
@@ -353,12 +338,17 @@ export function CreatePostScreen() {
     return true;
   };
 
-  const submit = () => {
+  const [postImages,setPostImages]=useState<File[]>([]);
+  const [posting,setPosting]=useState(false);
+  const postLock=useRef(false);
+  const submit = async () => {
+    if(postLock.current)return;
     if (!validate()) {
       notify({ title: "Please fill the required fields", variant: "warning" });
       return;
     }
-    if (!createPost(buildInput())) return;
+    postLock.current=true;setPosting(true);
+    try{if (!await createPost(buildInput(),postImages)) return;}finally{postLock.current=false;setPosting(false);}
     router.push(mode === "help" ? "/help" : "/home");
   };
 
@@ -538,7 +528,8 @@ export function CreatePostScreen() {
               </label>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <Button onClick={submit}>
+              <label>Post images (up to 6)<input aria-label="Post images" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event=>{const files=Array.from(event.currentTarget.files??[]);if(files.length>6||files.some(f=>f.size>5*1024*1024)){notify({title:"Choose up to 6 images under 5 MB each",variant:"warning"});return;}setPostImages(files);}}/></label>
+              <Button disabled={posting} onClick={submit}>
                 <CirclePlus className="h-4 w-4" />
                 {mode === "help" ? "Post Help Request" : "Post Now"}
               </Button>
@@ -556,22 +547,11 @@ export function CreatePostScreen() {
 
 export function HelpScreen() {
   useFeedLocation();
-  const { state, currentUser, locationLabel } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<(typeof helpTabs)[number]>("Need Help");
-  const helpPosts = useMemo(() => {
-    let posts = queryPosts(
-      discoveryPosts(asArray(state.posts), currentUser.id, state.chats, tab === "Solved")
-        .filter(post => post.type === "help"), query, "nearby", state.location);
-    if (tab === "Urgent") posts = posts.filter((post) => post.urgency === "Urgent");
-    if (tab === "Solved") posts = posts.filter((post) => post.status === "Solved");
-    if (tab === "Need Help") posts = posts.filter((post) => post.status === "Active");
-    return sortByNearbyRelevance(
-      newestFirst(posts),
-      state.location,
-      (post) => post
-    );
-  }, [query, state.location, state.posts, state.chats, currentUser.id, tab]);
+  const { state, locationLabel } = useAppStore();
+  const [query, setQuery] = useFeedPreference<string>("help-query", "");
+  const [tab, setTab] = useFeedPreference<(typeof helpTabs)[number]>("help-tab","Need Help");
+  const feed = useServerFeed(query,'nearby',tab==='Urgent'?'Urgent':'All','help',tab==='Solved'?'Solved':'Active');
+  const helpPosts = feed.posts;
 
   return (
     <ResidentShell>
@@ -598,7 +578,7 @@ export function HelpScreen() {
             {asArray(helpPosts).map((post) => (
               <HelpCard key={post.id} request={post} />
             ))}
-            {!helpPosts.length ? (
+            {!helpPosts.length && !feed.loading && !feed.error ? (
               <EmptyState
                 action={<Button href="/post?type=help">Post for Help</Button>}
                 description="Try another filter or create the first local help request."
@@ -607,6 +587,7 @@ export function HelpScreen() {
               />
             ) : null}
           </div>
+        <FeedPaging {...feed} />
       </div>
     </ResidentShell>
   );
@@ -665,15 +646,18 @@ export function ChatsScreen() {
 }
 
 export function MyPostsScreen() {
-  const { state, currentUser, deletePost, closePost, acceptInterestedUser, rejectInterestedUser } = useAppStore();
+  const router=useRouter();
+  const { state, currentUser, deletePost, closePost, updatePost, acceptInterestedUser, rejectInterestedUser } = useAppStore();
   const [tab, setTab] = useState<(typeof myPostTabs)[number]>("Active posts");
   const [interestedPost, setInterestedPost] = useState<LocalPost | null>(null);
+  const [interestedPeople,setInterestedPeople]=useState<Array<{id:string;name:string;profilePhoto?:string;location:{area?:string;city?:string}}>>([]),[peopleError,setPeopleError]=useState(''),[peopleLoading,setPeopleLoading]=useState(false);
+  const openInterested=async(post:LocalPost)=>{setInterestedPost(post);setInterestedPeople([]);setPeopleError('');setPeopleLoading(true);try{const people=[];for(let offset=0;offset<post.interestedUserIds.length;offset+=100){const response=await api<{people:typeof interestedPeople}>('/api/people?ids='+encodeURIComponent(post.interestedUserIds.slice(offset,offset+100).join(',')));people.push(...response.people);}setInterestedPeople(people);}catch{setPeopleError('Could not load interested people. Reopen to retry.');}finally{setPeopleLoading(false);}};
   const ownPosts = newestFirst(
     asArray(state.posts).filter((post) => isCurrentUserPost(post, currentUser.id))
   );
   const posts =
     tab === "Active posts"
-      ? ownPosts.filter(isPublishedActivePost)
+      ? ownPosts.filter(post=>isPublishedActivePost(post)||post.status==='Draft')
       : ownPosts.filter(isCompletedPost);
 
   return (
@@ -713,12 +697,14 @@ export function MyPostsScreen() {
                     <CheckCircle2 className="h-4 w-4" />
                     Close Post
                   </Button>
-                  <Button onClick={() => setInterestedPost(post)} variant="secondary">
+                  <Button onClick={() => openInterested(post)} variant="secondary">
                     <UsersRound className="h-4 w-4" />
                     Interested
                   </Button>
                 </div>
               </div>
+              <EntityImages label="Post images" scope="post" entityId={post.id} paths={post.imagePaths??[]} urls={post.images??[]} onSave={async paths=>Boolean(await updatePost(post.id,{images:paths}))}/>
+              {post.status==='Draft'?<Button onClick={()=>updatePost(post.id,{status:'Active'})}>Publish draft</Button>:null}
             </article>
           ))}
         </div>
@@ -737,8 +723,8 @@ export function MyPostsScreen() {
         title="Interested people"
       >
         <div className="space-y-3">
-          {asArray(interestedPost?.interestedUserIds).map((userId) => {
-            const user = asArray(state.residents).find((resident) => resident.id === userId);
+          {peopleLoading?<p role="status">Loading interested people…</p>:null}{peopleError?<p role="status">{peopleError}</p>:null}
+          {interestedPeople.map((user) => {
             if (!user) return null;
             return (
               <div className="flex items-center gap-3 rounded-2xl bg-szocial-mist p-3" key={user.id}>
@@ -747,7 +733,7 @@ export function MyPostsScreen() {
                   <p className="font-semibold text-szocial-ink">{user.name}</p>
                   <p className="text-sm text-szocial-muted">{user.location.area}</p>
                 </div>
-                <Button onClick={() => interestedPost && acceptInterestedUser(interestedPost.id, user.id)} size="sm">
+                <Button onClick={async () => {if(!interestedPost)return;const id=await acceptInterestedUser(interestedPost.id,user.id);if(id)router.push(`/chats?chatId=${id}`);}} size="sm">
                   Accept
                 </Button>
                 <Button onClick={() => interestedPost && rejectInterestedUser(interestedPost.id, user.id)} size="sm" variant="outline">
@@ -767,7 +753,7 @@ export function MyPostsScreen() {
 
 export function ProfileScreen() {
   const router = useRouter();
-  const { state, currentUser, locationLabel, updateResidentProfile, updatePrivacy, submitVerification, logoutResident } = useAppStore();
+  const { state, pages, currentUser, locationLabel, updateResidentProfile, updatePrivacy, submitVerification, logoutResident } = useAppStore();
   const { notify } = useToast();
   const [editOpen, setEditOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -790,7 +776,9 @@ export function ProfileScreen() {
     asArray(post.interestedUserIds).includes(currentUser.id)
   );
 
+  const photoSelection=useRef(0);
   const selectProfilePhoto = async (file?: File) => {
+    const selection=++photoSelection.current;
     if (!file) return;
 
     const validationMessage = validateProfileImageFile(file);
@@ -801,6 +789,7 @@ export function ProfileScreen() {
 
     try {
       const src = await loadImageFromFile(file);
+      if(selection!==photoSelection.current)return;
       setPendingPhoto({ fileName: file.name, src });
     } catch {
       notify({ title: "Could not load this image. Try another photo.", variant: "warning" });
@@ -828,13 +817,13 @@ export function ProfileScreen() {
             </div>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <StatCard label="My posts" value={String(myPosts.length)} />
-            <StatCard label="Joined" value={String(joined.length)} />
+            <StatCard label="My posts" value={String(pages.posts?.total??myPosts.length)} />
+            <StatCard label="Joined" value={String(pages.joined?.total??joined.length)} />
             <StatCard label="Rating" value="4.8" />
           </div>
         </section>
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <Button onClick={() => setEditOpen(true)} variant="outline">
+          <Button disabled={!currentUser.id} onClick={() => {setProfile({name:currentUser.name,bio:currentUser.bio,age:String(currentUser.age??''),gender:currentUser.gender??'Prefer not to say',profilePhoto:currentUser.profilePhoto??'',profilePhotoName:currentUser.profilePhotoName??''});setEditOpen(true);}} variant="outline">
             <Pencil className="h-4 w-4" />
             Edit Profile
           </Button>
@@ -842,18 +831,18 @@ export function ProfileScreen() {
             <MapPin className="h-4 w-4" />
             Change Location
           </Button>
+          <Button variant="outline" onClick={()=>{try{const posts=exportLegacyOwnPosts(currentUser.email);const url=URL.createObjectURL(new Blob([JSON.stringify(posts,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='szocial-legacy-posts.json';link.click();URL.revokeObjectURL(url);}catch(e){notify({title:'Export unavailable',description:e instanceof Error?e.message:'Could not export',variant:'warning'});}}}>Export old posts</Button>
           <Button onClick={submitVerification} variant="outline">
             <UserCheck className="h-4 w-4" />
             Verify Account
           </Button>
-          <Button onClick={() => setPrivacyOpen(true)} variant="outline">
+          <Button disabled={!currentUser.id} onClick={() => {setPrivacy(currentUser.privacy);setPrivacyOpen(true);}} variant="outline">
             <Settings className="h-4 w-4" />
             Privacy Settings
           </Button>
           <Button
-            onClick={() => {
-              logoutResident();
-              router.push("/");
+            onClick={async () => {
+              if(await logoutResident()) router.push("/");
             }}
             variant="secondary"
           >
@@ -892,6 +881,7 @@ export function ProfileScreen() {
               />
             </span>
           </label>
+          <Button variant="outline" onClick={()=>setProfile({...profile,profilePhoto:"",profilePhotoName:""})}>Remove photo</Button>
           <input className="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal" onChange={(event) => setProfile({ ...profile, name: event.target.value })} value={profile.name} />
           <textarea className="min-h-24 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal" onChange={(event) => setProfile({ ...profile, bio: event.target.value })} value={profile.bio} />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -902,17 +892,16 @@ export function ProfileScreen() {
           </div>
           <Button
             className="w-full"
-            onClick={() => {
-              updateResidentProfile({
+            onClick={async () => {
+              if(await updateResidentProfile({
                 name: profile.name,
                 bio: profile.bio,
                 age: profile.age ? Number(profile.age) : undefined,
                 gender: profile.gender as ResidentUser["gender"],
-                profilePhoto: profile.profilePhoto || undefined,
+                profilePhoto: profile.profilePhoto || "",
                 profilePhotoName: profile.profilePhotoName || undefined,
                 updatedAt: new Date().toISOString()
-              });
-              setEditOpen(false);
+              })) setEditOpen(false);
             }}
           >
             Save profile
@@ -924,7 +913,7 @@ export function ProfileScreen() {
         imageSrc={pendingPhoto?.src ?? ""}
         onCancel={() => setPendingPhoto(null)}
         onError={(message) => notify({ title: message, variant: "warning" })}
-        onUsePhoto={(croppedPhoto) => {
+        onUsePhoto={async (croppedPhoto) => {
           if (!pendingPhoto) return;
           const nextPhoto = {
             profilePhoto: croppedPhoto,
@@ -934,10 +923,7 @@ export function ProfileScreen() {
             ...current,
             ...nextPhoto
           }));
-          updateResidentProfile({
-            ...nextPhoto,
-            updatedAt: new Date().toISOString()
-          });
+
           setPendingPhoto(null);
         }}
         open={Boolean(pendingPhoto)}
@@ -961,9 +947,8 @@ export function ProfileScreen() {
           ))}
           <Button
             className="w-full"
-            onClick={() => {
-              updatePrivacy(privacy);
-              setPrivacyOpen(false);
+            onClick={async () => {
+              if(await updatePrivacy(privacy)) setPrivacyOpen(false);
             }}
           >
             Save settings
@@ -976,9 +961,10 @@ export function ProfileScreen() {
 }
 
 export function BusinessesScreen() {
-  const { state } = useAppStore();
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<(typeof businessCategories)[number]>("All");
+  const { state,setBusinessFilters } = useAppStore();
+  const [query, setQuery] = useFeedPreference<string>("business-query", "");
+  const [category, setCategory] = useFeedPreference<(typeof businessCategories)[number]>("business-category","All");
+  useEffect(()=>{setBusinessFilters(query,category);},[query,category,setBusinessFilters]);
   const locationName = getLocationName(state.location);
   const businesses = sortByNearbyRelevance(
     newestFirst(

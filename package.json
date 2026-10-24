@@ -7,17 +7,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --test tests/feed-chat.test.cjs"
+    "test": "node --test --test-isolation=none tests/*.test.cjs",
+    "test:browser": "node tests/browser.cjs && node tests/auth-browser.cjs",
+    "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.118.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
     "next": "^15.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sharp": "^0.35.5",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.17.0",
     "@types/node": "^22.10.7",
@@ -28,6 +34,7 @@
     "eslint-config-next": "^15.1.6",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "playwright": "1.56.1"
   }
 }

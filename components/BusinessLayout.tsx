@@ -1,4 +1,5 @@
 "use client";
+import {ResourcePaging} from "@/components/ResourcePaging";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -50,9 +51,8 @@ export function BusinessLayout({ children }: { children: ReactNode }) {
           </Link>
           <div className="flex items-center gap-2">
             <Button
-              onClick={() => {
-                markBusinessNotificationsRead();
-                router.push("/business/dashboard");
+              onClick={async () => {
+                if(await markBusinessNotificationsRead()) router.push("/business/dashboard");
               }}
               variant="outline"
             >
@@ -60,9 +60,8 @@ export function BusinessLayout({ children }: { children: ReactNode }) {
               Activity{businessUnreadCount ? ` (${businessUnreadCount})` : ""}
             </Button>
             <Button
-              onClick={() => {
-                logoutBusiness();
-                router.push("/");
+              onClick={async () => {
+                if(await logoutBusiness()) router.push("/");
               }}
               variant="outline"
             >
@@ -94,7 +93,7 @@ export function BusinessLayout({ children }: { children: ReactNode }) {
             );
           })}
         </aside>
-        <section className="min-w-0 flex-1">{children}</section>
+        <section className="min-w-0 flex-1">{children}<ResourcePaging/></section>
       </div>
     </main>
   );

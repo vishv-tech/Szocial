@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { PaymentLedger } from "@/components/PaymentLedger";
 import { useMemo, useState } from "react";
 import {
   BadgeCheck,
@@ -29,8 +30,8 @@ function locationLabel(location: { area?: string; city?: string }) {
   return [location.area, location.city].filter(Boolean).join(", ") || "Location unavailable";
 }
 
-function confirmAction(message: string, action: () => void) {
-  if (window.confirm(message)) action();
+function confirmAction<T>(message: string, action: () => T) {
+  if (window.confirm(message)) return action();
 }
 
 function PageHeader({
@@ -103,20 +104,20 @@ function StatusPill({ children }: { children: ReactNode }) {
 }
 
 export function AdminDashboardScreen() {
-  const { state } = useAppStore();
+  const { state,pages,stats } = useAppStore();
   const residents = asArray(state.residents);
   const businesses = asArray(state.businesses);
   const posts = asArray(state.posts);
   const reports = asArray(state.reports);
-  const openReports = reports.filter((report) => report.status === "Open");
-  const pendingBusinesses = businesses.filter((business) =>
+  const openReports = stats?.recentReports??reports.filter((report) => report.status === "Open");
+  const pendingBusinesses = stats?.pendingBusinesses??businesses.filter((business) =>
     ["Draft", "Pending Approval"].includes(business.status)
   );
   const revenue = asArray(state.paymentHistory)
     .filter((row) => row.status === "paid")
     .reduce((total, row) => total + row.amount, 0);
 
-  const locationActivity = useMemo(() => {
+  const computedLocationActivity = useMemo(() => {
     const counts = new Map<string, number>();
     posts.forEach((post) => {
       const label = locationLabel(post.location);
@@ -124,6 +125,7 @@ export function AdminDashboardScreen() {
     });
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   }, [posts]);
+  const locationActivity=stats?.locationActivity??computedLocationActivity;
 
   return (
     <div className="space-y-6">
@@ -134,14 +136,14 @@ export function AdminDashboardScreen() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={<UsersRound className="h-5 w-5" />} label="Total residents" value={String(residents.length)} />
-        <MetricCard icon={<Building2 className="h-5 w-5" />} label="Total businesses" value={String(businesses.length)} />
-        <MetricCard icon={<FileText className="h-5 w-5" />} label="Total posts" value={String(posts.length)} />
-        <MetricCard icon={<Flag className="h-5 w-5" />} label="Active reports" value={String(openReports.length)} />
-        <MetricCard icon={<Flag className="h-5 w-5" />} label="Reported posts" value={String(posts.filter((post) => post.reports > 0).length)} />
-        <MetricCard icon={<Ban className="h-5 w-5" />} label="Reported users" value={String(residents.filter((user) => user.reports > 0).length)} />
-        <MetricCard icon={<Store className="h-5 w-5" />} label="Pending approvals" value={String(pendingBusinesses.length)} />
-        <MetricCard icon={<CreditCard className="h-5 w-5" />} label="Mock revenue" value={`Rs. ${revenue}`} />
+        <MetricCard icon={<UsersRound className="h-5 w-5" />} label="Total residents" value={String(stats?.residents??pages.people?.total??residents.length)} />
+        <MetricCard icon={<Building2 className="h-5 w-5" />} label="Total businesses" value={String(stats?.businesses??pages.businesses?.total??businesses.length)} />
+        <MetricCard icon={<FileText className="h-5 w-5" />} label="Total posts" value={String(stats?.posts??pages.posts?.total??posts.length)} />
+        <MetricCard icon={<Flag className="h-5 w-5" />} label="Active reports" value={String(stats?.openReports??openReports.length)} />
+        <MetricCard icon={<Flag className="h-5 w-5" />} label="Reported posts" value={String(stats?.reportedPosts??posts.filter((post) => post.reports > 0).length)} />
+        <MetricCard icon={<Ban className="h-5 w-5" />} label="Reported users" value={String(stats?.reportedUsers??residents.filter((user) => user.reports > 0).length)} />
+        <MetricCard icon={<Store className="h-5 w-5" />} label="Pending approvals" value={String(stats?.pendingApprovals??pendingBusinesses.length)} />
+        <MetricCard icon={<CreditCard className="h-5 w-5" />} label="Verified revenue" value={`Rs. ${stats?.revenue??revenue}`} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -214,16 +216,16 @@ export function AdminDashboardScreen() {
       <AdminPanel title="Platform activity overview">
         <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <p className="rounded-2xl bg-slate-800 p-4 text-slate-300">
-            Active residents: <strong className="text-white">{residents.filter((user) => user.status === "Active").length}</strong>
+            Active residents: <strong className="text-white">{stats?.activeResidents??residents.filter((user) => user.status === "Active").length}</strong>
           </p>
           <p className="rounded-2xl bg-slate-800 p-4 text-slate-300">
-            Live businesses: <strong className="text-white">{businesses.filter((business) => business.status === "Live").length}</strong>
+            Live businesses: <strong className="text-white">{stats?.liveBusinesses??businesses.filter((business) => business.status === "Live").length}</strong>
           </p>
           <p className="rounded-2xl bg-slate-800 p-4 text-slate-300">
-            Active posts: <strong className="text-white">{posts.filter((post) => post.status === "Active").length}</strong>
+            Active posts: <strong className="text-white">{stats?.activePosts??posts.filter((post) => post.status === "Active").length}</strong>
           </p>
           <p className="rounded-2xl bg-slate-800 p-4 text-slate-300">
-            Paid listings: <strong className="text-white">{businesses.filter((business) => business.payment?.status === "paid").length}</strong>
+            Paid listings: <strong className="text-white">{stats?.paidListings??businesses.filter((business) => business.payment?.status === "paid").length}</strong>
           </p>
         </div>
       </AdminPanel>
@@ -392,6 +394,7 @@ export function AdminBusinessesScreen() {
           {!businesses.length ? <EmptyAdminState message="No business listings." /> : null}
         </div>
       </AdminPanel>
+      <PaymentLedger />
       <Modal onClose={() => setSelectedBusiness(null)} open={Boolean(selectedBusiness)} title="Business details">
         {selectedBusiness ? (
           <div className="space-y-3 rounded-2xl bg-szocial-mist p-4 text-sm text-szocial-muted">

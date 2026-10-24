@@ -23,7 +23,6 @@ export const sampleResidents: ResidentUser[] = [
     name: "Vishv Lange",
     email: "vishv@szocial.local",
     mobile: "9876543210",
-    password: "demo123",
     avatar:
       "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80",
     age: 22,
@@ -44,7 +43,6 @@ export const sampleResidents: ResidentUser[] = [
     id: "user-aarya",
     name: "Aarya Mehta",
     email: "aarya@szocial.local",
-    password: "demo123",
     avatar:
       "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80",
     age: 24,
@@ -65,7 +63,6 @@ export const sampleResidents: ResidentUser[] = [
     id: "user-rohan",
     name: "Rohan Shah",
     email: "rohan@szocial.local",
-    password: "demo123",
     avatar:
       "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=200&q=80",
     age: 29,
@@ -86,7 +83,6 @@ export const sampleResidents: ResidentUser[] = [
     id: "user-sana",
     name: "Sana Khan",
     email: "sana@szocial.local",
-    password: "demo123",
     avatar:
       "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80",
     age: 26,
@@ -284,7 +280,6 @@ export const sampleBusinessOwners: BusinessOwner[] = [
     id: "owner-mocha",
     ownerName: "Kabir Fernandes",
     email: "owner@mocha.local",
-    password: "demo123",
     businessId: "biz-mocha",
     paymentStatus: "paid"
   }

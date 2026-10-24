@@ -21,6 +21,8 @@ export function validateProfileImageFile(file: File) {
     return "Please select a valid image file.";
   }
 
+  if (!file.size) return "The image file is empty.";
+
   if (file.size > PROFILE_IMAGE_MAX_BYTES) {
     return "Image must be under 2 MB.";
   }
@@ -38,23 +40,28 @@ export function loadImageFromFile(file: File) {
       }
       reject(new Error("Image file could not be read."));
     };
-    reader.onerror = () => reject(new Error("Image file could not be read."));
-    reader.readAsDataURL(file);
+    reader.onerror = reader.onabort = () => reject(new Error("Image file could not be read."));
+    try{reader.readAsDataURL(file);}catch{reject(new Error("Image file could not be read."));}
   });
 }
 
-function loadImageElement(src: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => {
-      if (image.naturalWidth && image.naturalHeight) {
-        resolve(image);
-        return;
-      }
-      reject(new Error("Image has no readable dimensions."));
+export function loadImageElement(src: string, signal?:AbortSignal) {
+  return new Promise<HTMLImageElement>((resolve,reject)=>{
+    const image=new Image();let finished=false;
+    const cleanup=()=>{clearTimeout(timer);image.onload=null;image.onerror=null;signal?.removeEventListener('abort',abort);};
+    const fail=(message:string)=>{if(finished)return;finished=true;cleanup();image.src='';reject(new Error(message));};
+    const abort=()=>fail('Image loading was cancelled.');
+    const timer=setTimeout(()=>fail('Image decoding timed out. Try a smaller photo.'),10000);
+    image.onload=()=>{
+      if(finished)return;
+      const width=image.naturalWidth,height=image.naturalHeight;
+      if(!width||!height||!Number.isFinite(width*height))return fail('Image has no readable dimensions.');
+      if(width*height>25000000||width>10000||height>10000)return fail('Image dimensions are too large. Choose a photo under 25 megapixels.');
+      finished=true;cleanup();resolve(image);
     };
-    image.onerror = () => reject(new Error("Image could not be loaded."));
-    image.src = src;
+    image.onerror=()=>fail('Could not decode this image. Choose a valid JPEG, PNG or WebP photo.');
+    if(signal?.aborted)return abort();signal?.addEventListener('abort',abort,{once:true});
+    image.src=src;
   });
 }
 
@@ -152,6 +159,7 @@ export async function cropImageToSquare(
   settings: ProfileImageCropSettings,
   outputSize = PROFILE_IMAGE_OUTPUT_SIZE
 ) {
+  if(![settings.cropSize,settings.zoom,settings.positionX,settings.positionY,outputSize].every(Number.isFinite)||settings.cropSize<=0||settings.zoom<1||settings.zoom>4||outputSize<=0||outputSize>4096)throw new Error('Invalid crop dimensions.');
   const image = await loadImageElement(dataUrl);
   const cropSize = Math.max(1, settings.cropSize);
   const sourceRect = getProfileImageSourceRect({
@@ -183,8 +191,7 @@ export async function cropImageToSquare(
     outputSize
   );
 
-  return canvas.toDataURL(
-    PROFILE_IMAGE_OUTPUT_TYPE,
-    PROFILE_IMAGE_OUTPUT_QUALITY
-  );
+  const output=canvas.toDataURL(PROFILE_IMAGE_OUTPUT_TYPE,PROFILE_IMAGE_OUTPUT_QUALITY);
+  if(!output.startsWith('data:image/jpeg;base64,')||output.length<100)throw new Error('The cropped photo could not be created. Try a smaller image.');
+  return output;
 }

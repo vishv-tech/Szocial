@@ -1,0 +1,56 @@
+{
+  "phase": "after",
+  "mode": "production",
+  "conditions": {
+    "fixtureProfiles": 241,
+    "fixturePosts": 240,
+    "fixtureComments": 1200,
+    "fixtureConversations": 20,
+    "fixtureMessages": 2000,
+    "httpDelayMs": 35,
+    "hosted": false
+  },
+  "initialHomeMs": 1450.1637719999999,
+  "api": {
+    "/api/app": {
+      "medianMs": 205.38104399999793,
+      "requests": {
+        "auth": 1,
+        "rest": 6,
+        "storage": 1,
+        "signedPaths": 1
+      },
+      "bytes": 1201,
+      "serverTiming": "total;dur=194.9,auth;dur=37.9,data;dur=228.8,storage;dur=38.3,serialization;dur=0.01,requests;desc=\"8\""
+    },
+    "/api/feed": {
+      "medianMs": 278.5942060000016,
+      "requests": {
+        "auth": 1,
+        "rest": 8,
+        "storage": 2,
+        "signedPaths": 12
+      },
+      "bytes": 36540,
+      "serverTiming": "total;dur=273.5,auth;dur=37.3,data;dur=306.3,storage;dur=76.2,serialization;dur=0.07,requests;desc=\"11\""
+    }
+  },
+  "idleOneMinute": {
+    "apiRequests": 0,
+    "appRequests": 0,
+    "feedRequests": 0,
+    "loadingFlashes": 0,
+    "initialLoadingAtIdle": 0
+  },
+  "subscriptions": {
+    "joins": 2,
+    "peakChannels": 1
+  },
+  "idleHeapBytes": {
+    "before": 6131776,
+    "after": 6272276
+  },
+  "feedbackMs": 4.899999998509884,
+  "chatOpenMs": 994.2134719999885,
+  "chatClickMs": 223.085923000006
+}

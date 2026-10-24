@@ -16,8 +16,8 @@ export type ResidentUser = {
   name: string;
   email: string;
   mobile?: string;
-  password: string;
   avatar: string;
+  avatarPath?: string;
   profilePhoto?: string;
   profilePhotoName?: string;
   updatedAt?: string;
@@ -49,6 +49,10 @@ export type PostComment = {
 };
 
 export type LocalPost = {
+  author?: PostAuthor;
+  people?: PostAuthor[];
+  imagePaths?: string[];
+  images?: string[];
   id: string;
   type: PostType;
   category: string;
@@ -88,7 +92,7 @@ export type BusinessCategory =
   | "Other";
 
 export type BusinessStatus = "Draft" | "Live" | "Paused" | "Pending Approval" | "Removed";
-export type PaymentStatus = "unpaid" | "paid" | "failed" | "cancelled";
+export type PaymentStatus = "unpaid" | "paid" | "failed" | "cancelled" | "created" | "refunded";
 
 export type PaymentPlan = {
   id: "starter" | "growth" | "premium";
@@ -115,12 +119,14 @@ export type BusinessOwner = {
   id: string;
   ownerName: string;
   email: string;
-  password: string;
   businessId: string;
   paymentStatus: PaymentStatus;
 };
 
 export type Business = {
+  isSaved?: boolean;
+  detailsLoaded?: boolean;
+  analyticsLoaded?: boolean;
   id: string;
   ownerId: string;
   name: string;
@@ -143,6 +149,7 @@ export type Business = {
   listedByResidents: boolean;
   coverImage: string;
   logo: string;
+  mediaPaths?: {logo:string;coverImage:string;gallery:string[]};
   gallery: string[];
   rating: number;
   reviews: number;
@@ -158,6 +165,8 @@ export type Business = {
 export type ChatType = "Fun" | "Help" | "Business";
 
 export type ChatMessage = {
+  clientId?: string;
+  delivery?: "pending" | "failed";
   id: string;
   senderId: string;
   senderType?: "resident" | "business";
@@ -185,6 +194,9 @@ export type Chat = {
   avatar: string;
   location: string;
   status: "Active" | "Blocked" | "Left";
+  historyLoaded?: boolean;
+  historyHasMore?: boolean;
+  blockedByIds?: string[];
   blockedById?: string;
   blockedByType?: "resident" | "business";
   blockedAt?: string;
@@ -236,6 +248,9 @@ export type NotificationType =
   | "message"
   | "business_message"
   | "business_interest"
+  | "accepted"
+  | "business_offer"
+  | "moderation"
   | "system";
 
 export type NotificationRecipientType = "resident" | "business";
@@ -251,7 +266,7 @@ export type SzocialNotification = {
   title: string;
   message: string;
   entityId?: string;
-  entityType?: "post" | "help_post" | "business" | "chat" | "comment";
+  entityType?: "post" | "help_post" | "business" | "chat" | "comment" | "report";
   postId?: string;
   businessId?: string;
   chatId?: string;
@@ -260,6 +275,8 @@ export type SzocialNotification = {
 };
 
 export type PaymentHistoryRow = {
+  mode?: 'test'|'live';
+  refundedAmount?: number;
   id: string;
   date: string;
   businessId: string;
@@ -283,3 +300,8 @@ export type AppState = {
   currentBusinessOwnerId: string | null;
   location: LocationInfo;
 };
+
+/** Public identity needed to render a post; private profile fields stay out of feeds. */
+export type PostAuthor = Pick<ResidentUser, "id" | "name" | "avatarPath" | "profilePhoto" | "verified">;
+
+export type AdminStatistics={residents:number;businesses:number;posts:number;activeResidents:number;liveBusinesses:number;activePosts:number;openReports:number;pendingApprovals:number;reportedPosts:number;reportedUsers:number;revenue:number;paidListings:number;locationActivity:[string,number][];recentReports:{id:string;itemType:string;itemLabel:string;reason:string;createdAt:string}[];pendingBusinesses:{id:string;name:string;category:string;status:string;location:{area?:string;city?:string}}[]};

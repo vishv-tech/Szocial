@@ -1,5 +1,6 @@
 "use client";
 
+import {useEffect,useRef,useState} from "react";
 import { useRouter } from "next/navigation";
 import {
   BadgeCheck,
@@ -27,6 +28,9 @@ export function BusinessCard({ business }: BusinessCardProps) {
   const router = useRouter();
   const { startBusinessChat, toggleSaveBusiness } = useAppStore();
   const { notify } = useToast();
+  const [saved,setSaved]=useState(Boolean(business.isSaved));const saving=useRef(false);
+  useEffect(()=>{if(!saving.current)setSaved(Boolean(business.isSaved));},[business.isSaved]);
+  const toggleSave=async()=>{if(saving.current)return;saving.current=true;const old=saved;setSaved(!old);try{if(!await toggleSaveBusiness(business.id))setSaved(old);}finally{saving.current=false;}};
   const locationArea = business.location?.area ?? "Nearby";
 
   const shareBusiness = async () => {
@@ -37,7 +41,7 @@ export function BusinessCard({ business }: BusinessCardProps) {
   return (
     <article className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-soft">
       <div className="relative h-52 overflow-hidden">
-        <img
+        <img loading="lazy" decoding="async"
           alt={business.name}
           className="h-full w-full object-cover transition duration-500 hover:scale-105"
           src={business.coverImage}
@@ -55,7 +59,7 @@ export function BusinessCard({ business }: BusinessCardProps) {
       </div>
       <div className="p-5">
         <div className="flex items-start gap-3">
-          <img
+          <img loading="lazy" decoding="async"
             alt={`${business.name} logo`}
             className="h-14 w-14 rounded-2xl border-4 border-white object-cover shadow-soft"
             src={business.logo}
@@ -95,14 +99,14 @@ export function BusinessCard({ business }: BusinessCardProps) {
             <ExternalLink className="h-4 w-4" />
             View
           </Button>
-          <Button onClick={() => toggleSaveBusiness(business.id)} variant="outline">
+          <Button onClick={toggleSave} variant={saved?"secondary":"outline"}>
             <Bookmark className="h-4 w-4" />
-            Save
+            {saved?"Saved":"Save"}
           </Button>
           <Button
-            onClick={() => {
-              const chatId = startBusinessChat(business.id);
-              router.push(`/chats?chatId=${chatId}`);
+            onClick={async () => {
+              const chatId = await startBusinessChat(business.id);
+              if (chatId) router.push(`/chats?chatId=${chatId}`);
             }}
             variant="outline"
           >

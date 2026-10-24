@@ -44,17 +44,23 @@ function getLocationErrorMessage(error: GeolocationPositionError) {
 export function ChatWindow({ chat }: ChatWindowProps) {
   const {
     blockChat,
+    loadOlderMessages,
+    ensureChatHistory,setActiveThread,
     markChatRead,
     currentBusinessOwner,
     sendChatMessage,
     state
   } = useAppStore();
   const { notify } = useToast();
+  const sendingRef=useRef(false);
+  const [sending,setSending]=useState(false);
   const [message, setMessage] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const locationRequestActive = useRef(false);
 
+  useEffect(()=>{setActiveThread(chat?.id??null);return()=>setActiveThread(null);},[chat?.id,setActiveThread]);
+  useEffect(()=>{if(chat?.id&&!chat.historyLoaded)void ensureChatHistory(chat.id);},[chat?.id,chat?.historyLoaded,ensureChatHistory]);
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (chat?.id) markChatRead(chat.id);
@@ -97,23 +103,20 @@ export function ChatWindow({ chat }: ChatWindowProps) {
   );
   const otherParticipantPhoto =
     otherParticipant.profilePhoto || createInitialsAvatar(otherParticipant.name);
-  const currentParticipantType = currentBusinessOwner
-    ? "business"
-    : "resident";
   const isBlocked = chat.status === "Blocked";
   const blockedByCurrentParticipant =
     isBlocked &&
     Boolean(currentParticipantId) &&
-    chat.blockedById === currentParticipantId &&
-    chat.blockedByType === currentParticipantType;
+    (chat.blockedByIds??[chat.blockedById]).includes(currentParticipantId!);
   const canManageBlock =
     Boolean(currentParticipantId) &&
-    asArray(chat.participantIds).includes(currentParticipantId ?? "") &&
-    (chat.status === "Active" || blockedByCurrentParticipant);
+    asArray(chat.participantIds).includes(currentParticipantId ?? "");
   const canSendMessages = canMessage(state.chats, chat, currentParticipantId);
-  const sendMessage = () => {
-    if (sendChatMessage(chat.id, message)) setMessage("");
-    else notify({ title: "Message not sent", description: "Messaging is unavailable or the message could not be saved. Your draft was kept.", variant: "warning" });
+  const sendMessage = async () => {
+    if(sendingRef.current)return;
+    sendingRef.current=true;setSending(true);
+    try {if (await sendChatMessage(chat.id, message)) setMessage("");}
+    finally{sendingRef.current=false;setSending(false);}
   };
 
   const shareCurrentLocation = () => {
@@ -143,14 +146,14 @@ export function ChatWindow({ chat }: ChatWindowProps) {
     };
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const latitude = position.coords.latitude;
         const longitude = position.coords.longitude;
         const query = encodeURIComponent(`${latitude},${longitude}`);
         const mapsUrl =
           `https://www.google.com/maps/search/?api=1&query=${query}`;
 
-        const shared = sendChatMessage(chat.id, {
+        const shared = await sendChatMessage(chat.id, {
           text: "Shared a location",
           kind: "location",
           latitude,
@@ -225,6 +228,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
       </header>
 
       <div className="max-h-[520px] min-h-[420px] space-y-3 overflow-y-auto bg-szocial-mist p-4">
+        {chat.historyHasMore ? <Button variant="outline" onClick={()=>loadOlderMessages(chat.id)}>Load earlier messages</Button> : null}
         {orderedMessages(asArray(chat.messages)).map((item) => {
           const mine = isMessageFromCurrentUser(item, currentParticipantId);
           const sender = getChatParticipant(
@@ -287,7 +291,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
                   <p>{item.text}</p>
                 )}
                 <p className={cn("mt-1 text-[11px]", mine ? "text-white/70" : "text-szocial-muted")}>
-                  <RelativeTime timestamp={item.createdAt} />
+                  <RelativeTime timestamp={item.createdAt} /> {item.delivery==='pending'?<span>Sending…</span>:item.delivery==='failed'?<span>Not sent. Retry your draft below.</span>:null}
                 </p>
               </div>
             </div>
@@ -325,7 +329,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
             value={message}
           />
           <Button
-            disabled={!canSendMessages || !message.trim()}
+            disabled={sending || !canSendMessages || !message.trim()}
             onClick={sendMessage}
           >
             <Send className="h-4 w-4" />

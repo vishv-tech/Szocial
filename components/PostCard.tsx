@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo,useEffect,useRef,useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarDays,
@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/Button";
 import { RelativeTime } from "@/components/RelativeTime";
 import { ReportModal } from "@/components/ReportModal";
-import { useAppStore } from "@/components/AppStoreProvider";
+import { useFeedRuntime } from "@/components/AppStoreProvider";
 import { useToast } from "@/components/ToastProvider";
 import type { LocalPost } from "@/types";
 import { formatUserLocation } from "@/lib/location";
@@ -29,26 +29,25 @@ type PostCardProps = {
   post: LocalPost;
 };
 
-export function PostCard({ post }: PostCardProps) {
+export const PostCard=memo(function PostCard({ post }: PostCardProps) {
   const router = useRouter();
-  const {
-    state,
-    currentUser,
-    addComment,
-    startPostChat,
-    toggleInterest
-  } = useAppStore();
+  const {residents,actorId,location,run}=useFeedRuntime();
+  const state={residents,location},currentUser={id:actorId};
+  const addComment=(id:string,text:string)=>run('comment',{id,text});
+  const startPostChat=async(postId:string)=>(await run('start_chat',{postId}))?.id??'';
   const { notify } = useToast();
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comment, setComment] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
-  const author =
+  const author = post.author??
     asArray(state.residents).find((user) => user.id === post.authorId) ??
-    asArray(state.residents)[0] ??
-    currentUser;
+    {name:'Unavailable resident',verified:false};
   const postLocation = post.location ?? state.location;
   const isHelp = post.type === "help";
-  const interested = asArray(post.interestedUserIds).includes(currentUser.id);
+  const authoritative=asArray(post.interestedUserIds).includes(currentUser.id);
+  const [interested,setInterested]=useState(authoritative),[pending,setPending]=useState(false);const lock=useRef(false);
+  useEffect(()=>{if(!lock.current)setInterested(authoritative);},[authoritative]);
+  const toggleInterest=async(id:string)=>{if(lock.current)return;lock.current=true;setPending(true);const old=interested;setInterested(!old);try{if(!await run('interest',{id}))setInterested(old);}finally{lock.current=false;setPending(false);}};
   const Icon = isHelp ? HandHeart : PartyPopper;
 
   const sharePost = async () => {
@@ -60,8 +59,9 @@ export function PostCard({ post }: PostCardProps) {
   return (
     <article className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-soft">
       <div className="p-5">
+        {post.images?.length?<div className="flex gap-2 overflow-x-auto">{post.images.map(image=><img loading="lazy" decoding="async" key={image} alt={post.title} src={image} className="h-40 rounded-xl object-cover"/>)}</div>:null}
         <div className="flex items-start gap-3">
-          <img
+          <img loading="lazy" decoding="async"
             alt={author.name}
             className="h-12 w-12 rounded-2xl object-cover"
             src={getUserDisplayPhoto(author)}
@@ -158,8 +158,8 @@ export function PostCard({ post }: PostCardProps) {
           </button>
           <button
             className="flex min-h-11 flex-col items-center justify-center rounded-xl transition hover:bg-szocial-mist"
-            onClick={() => {
-              const chatId = startPostChat(post.id);
+            onClick={async () => {
+              const chatId = await startPostChat(post.id);
               if (chatId) router.push(`/chats?chatId=${chatId}`);
             }}
             type="button"
@@ -187,6 +187,7 @@ export function PostCard({ post }: PostCardProps) {
 
         <Button
           className="mt-4 w-full"
+          disabled={pending}
           onClick={() => toggleInterest(post.id)}
           variant={interested ? "secondary" : "primary"}
         >
@@ -199,12 +200,11 @@ export function PostCard({ post }: PostCardProps) {
             <div className="space-y-3">
               {asArray(post.comments).map((item) => {
                 const commenter =
-                  asArray(state.residents).find((resident) => resident.id === item.userId) ??
-                  asArray(state.residents)[0] ??
-                  currentUser;
+                  asArray(post.people??state.residents).find((resident) => resident.id === item.userId) ??
+                  {name:'Unavailable resident'};
                 return (
                   <div className="flex gap-3 rounded-xl bg-white p-3" key={item.id}>
-                    <img
+                    <img loading="lazy" decoding="async"
                       alt={commenter.name}
                       className="h-9 w-9 rounded-xl object-cover"
                       src={getUserDisplayPhoto(commenter)}
@@ -231,9 +231,8 @@ export function PostCard({ post }: PostCardProps) {
                 value={comment}
               />
               <Button
-                onClick={() => {
-                  addComment(post.id, comment);
-                  setComment("");
+                onClick={async () => {
+                  if(await addComment(post.id, comment)) setComment("");
                 }}
               >
                 Send
@@ -252,4 +251,4 @@ export function PostCard({ post }: PostCardProps) {
       />
     </article>
   );
-}
+});

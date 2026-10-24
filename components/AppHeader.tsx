@@ -18,7 +18,7 @@ export function AppHeader({ compact = false }: AppHeaderProps) {
   const {
     currentUser,
     markResidentNotificationsRead,
-    residentNotifications,
+    residentNotifications, pages, loadMoreResource,
     residentUnreadCount,
     state
   } = useAppStore();
@@ -132,6 +132,7 @@ export function AppHeader({ compact = false }: AppHeaderProps) {
               </article>
             );
           })}
+          {pages.notifications?.hasMore?<Button variant="outline" onClick={()=>loadMoreResource("notifications")}>Load more notifications</Button>:null}
           {!residentNotifications.length ? (
             <article className="rounded-2xl bg-szocial-mist p-4 text-sm text-szocial-muted">
               No notifications for this account yet.

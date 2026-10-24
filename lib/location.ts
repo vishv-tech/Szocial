@@ -189,31 +189,20 @@ export async function reverseGeocodeLocation(
   }
 }
 
+// Signup location lives in memory until the verified profile is saved to Supabase.
+let pendingLocation: LocationInfo | null = null;
 export function saveUserLocation(location: LocationInfo): LocationInfo | null {
-  const normalized = normalizeUserLocation(location, location.source ?? "manual");
-  if (!normalized || typeof window === "undefined") return normalized;
-
-  window.localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(normalized));
-  return normalized;
+  pendingLocation = normalizeUserLocation(location, location.source ?? 'manual');
+  if (typeof window !== 'undefined') window.localStorage.removeItem(LOCATION_STORAGE_KEY);
+  return pendingLocation;
 }
-
 export function loadUserLocation(): LocationInfo | null {
-  if (typeof window === "undefined") return null;
-
-  const stored = window.localStorage.getItem(LOCATION_STORAGE_KEY);
-  if (!stored) return null;
-
-  try {
-    return normalizeUserLocation(JSON.parse(stored));
-  } catch {
-    return null;
-  }
+  if (typeof window !== 'undefined') window.localStorage.removeItem(LOCATION_STORAGE_KEY);
+  return pendingLocation;
 }
-
 export function clearUserLocation() {
-  if (typeof window !== "undefined") {
-    window.localStorage.removeItem(LOCATION_STORAGE_KEY);
-  }
+  pendingLocation = null;
+  if (typeof window !== 'undefined') window.localStorage.removeItem(LOCATION_STORAGE_KEY);
 }
 
 export function formatUserLocation(
