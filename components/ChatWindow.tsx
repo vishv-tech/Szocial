@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Flag,
   MapPin,
@@ -20,6 +20,7 @@ import {
   getOtherChatParticipant,
   isMessageFromCurrentUser
 } from "@/lib/chat-participants";
+import { canMessage, orderedMessages } from "@/lib/chat-rules";
 import { createInitialsAvatar } from "@/lib/user-photo";
 import { asArray, cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ function getLocationErrorMessage(error: GeolocationPositionError) {
 export function ChatWindow({ chat }: ChatWindowProps) {
   const {
     blockChat,
+    markChatRead,
     currentBusinessOwner,
     sendChatMessage,
     state
@@ -53,7 +55,20 @@ export function ChatWindow({ chat }: ChatWindowProps) {
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const locationRequestActive = useRef(false);
 
-  if (!chat) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (chat?.id) markChatRead(chat.id);
+  }, [chat?.id, chat?.lastMessageAt, markChatRead]);
+
+  useEffect(() => {
+    setMessage("");
+    setReportOpen(false);
+  }, [chat?.id]);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "nearest" });
+  }, [chat?.id, chat?.messages.length]);
+
+  if (!chat || !(chat.participantIds ?? []).includes(currentBusinessOwner?.id ?? state.currentUserId ?? "")) {
     return (
       <div className="flex min-h-[520px] items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-center shadow-soft">
         <div>
@@ -95,10 +110,11 @@ export function ChatWindow({ chat }: ChatWindowProps) {
     Boolean(currentParticipantId) &&
     asArray(chat.participantIds).includes(currentParticipantId ?? "") &&
     (chat.status === "Active" || blockedByCurrentParticipant);
-  const canSendMessages =
-    chat.status === "Active" &&
-    Boolean(currentParticipantId) &&
-    asArray(chat.participantIds).includes(currentParticipantId ?? "");
+  const canSendMessages = canMessage(state.chats, chat, currentParticipantId);
+  const sendMessage = () => {
+    if (sendChatMessage(chat.id, message)) setMessage("");
+    else notify({ title: "Message not sent", description: "Messaging is unavailable or the message could not be saved. Your draft was kept.", variant: "warning" });
+  };
 
   const shareCurrentLocation = () => {
     if (
@@ -173,7 +189,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
   };
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-soft">
+    <section className="min-w-0 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-soft">
       <header className="flex items-center gap-3 border-b border-slate-100 p-4">
         <img alt={otherParticipant.name} className="h-12 w-12 rounded-2xl object-cover" src={otherParticipantPhoto} />
         <div className="min-w-0 flex-1">
@@ -182,7 +198,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
             {otherParticipant.location || chat.location} - {chat.status}
           </p>
         </div>
-        <Button onClick={() => setReportOpen(true)} size="sm" variant="ghost">
+        <Button aria-label="Report conversation" onClick={() => setReportOpen(true)} size="sm" variant="ghost">
           <Flag className="h-4 w-4" />
         </Button>
         {canManageBlock ? (
@@ -209,7 +225,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
       </header>
 
       <div className="max-h-[520px] min-h-[420px] space-y-3 overflow-y-auto bg-szocial-mist p-4">
-        {asArray(chat.messages).map((item) => {
+        {orderedMessages(asArray(chat.messages)).map((item) => {
           const mine = isMessageFromCurrentUser(item, currentParticipantId);
           const sender = getChatParticipant(
             chat,
@@ -239,7 +255,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
               ) : null}
               <div
                 className={cn(
-                  "max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm",
+                  "max-w-[82%] break-words rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm",
                   item.kind === "system"
                     ? "bg-white text-szocial-muted"
                     : mine
@@ -277,7 +293,8 @@ export function ChatWindow({ chat }: ChatWindowProps) {
             </div>
           );
         })}
-        {isBlocked ? (
+        <div ref={bottomRef} />
+        {isBlocked || !canSendMessages ? (
           <div className="rounded-2xl bg-white p-4 text-center text-sm font-semibold text-szocial-muted">
             {blockedByCurrentParticipant
               ? "You blocked this chat. Select Unblock above to continue messaging."
@@ -303,15 +320,13 @@ export function ChatWindow({ chat }: ChatWindowProps) {
             className="min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal"
             disabled={!canSendMessages}
             onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing && message.trim() && canSendMessages) { event.preventDefault(); sendMessage(); } }}
             placeholder="Type a message..."
             value={message}
           />
           <Button
             disabled={!canSendMessages || !message.trim()}
-            onClick={() => {
-              sendChatMessage(chat.id, message);
-              setMessage("");
-            }}
+            onClick={sendMessage}
           >
             <Send className="h-4 w-4" />
             Send

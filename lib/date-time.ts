@@ -92,6 +92,14 @@ export function parseTimestamp(value: TimestampValue) {
     /^[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}/.test(trimmed) ||
     /^\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/.test(trimmed)
   ) {
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+      const [year, month, day] = trimmed.slice(0, 10).split("-").map(Number);
+      const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      if (month < 1 || month > 12 || day < 1 || day > days) return null;
+      // Historical ISO-like values without an offset are UTC, independent of the viewer.
+      const iso = trimmed.replace(" ", "T");
+      return validDate(new Date(iso.includes("T") && !/(Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? `${iso}Z` : iso));
+    }
     return validDate(new Date(trimmed));
   }
 
@@ -114,26 +122,24 @@ export function normalizeTimestamp(
   if (parsed) return parsed.toISOString();
 
   const migrationNow =
-    parseTimestamp(options.migrationNow) ?? new Date();
-  if (typeof value === "string") {
+    parseTimestamp(options.migrationNow);
+  if (typeof value === "string" && migrationNow) {
     const legacy = parseLegacyTimestamp(value, migrationNow);
     if (legacy) return legacy.toISOString();
   }
 
-  return (
-    parseTimestamp(options.fallback) ??
-    migrationNow
-  ).toISOString();
+  return parseTimestamp(options.fallback)?.toISOString() ?? (typeof value === "string" ? value : "");
 }
 
 export function timestampToMilliseconds(value: TimestampValue) {
   return parseTimestamp(value)?.getTime() ?? 0;
 }
 
-export function formatFullDateTime(value: TimestampValue) {
+export function formatFullDateTime(value: TimestampValue, timeZone?: string) {
   const timestamp = parseTimestamp(value);
   if (!timestamp) return "Time unavailable";
   return new Intl.DateTimeFormat(undefined, {
+    timeZone,
     day: "numeric",
     month: "short",
     year: "numeric",

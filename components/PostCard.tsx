@@ -160,7 +160,7 @@ export function PostCard({ post }: PostCardProps) {
             className="flex min-h-11 flex-col items-center justify-center rounded-xl transition hover:bg-szocial-mist"
             onClick={() => {
               const chatId = startPostChat(post.id);
-              router.push(`/chats?chatId=${chatId}`);
+              if (chatId) router.push(`/chats?chatId=${chatId}`);
             }}
             type="button"
           >

@@ -1,5 +1,8 @@
 "use client";
 
+import { canMessage, isPairBlocked, orderedMessages } from "@/lib/chat-rules";
+import { editPost } from "@/lib/feed";
+
 import {
   createContext,
   type ReactNode,
@@ -45,7 +48,8 @@ import {
 } from "@/lib/chat-participants";
 import {
   createTimestamp,
-  normalizeTimestamp
+  normalizeTimestamp,
+  timestampToMilliseconds
 } from "@/lib/date-time";
 import { asArray } from "@/lib/utils";
 import type {
@@ -168,7 +172,6 @@ type AppStoreContextValue = {
   updatePost: (postId: string, input: Partial<LocalPost>) => void;
   deletePost: (postId: string) => void;
   closePost: (postId: string) => void;
-  markSolved: (postId: string) => void;
   acceptInterestedUser: (postId: string, userId: string) => string;
   rejectInterestedUser: (postId: string, userId: string) => void;
   submitReport: (
@@ -176,11 +179,12 @@ type AppStoreContextValue = {
     itemId: string,
     itemLabel: string,
     reason: ReportReason
-  ) => void;
+  ) => boolean;
   startPostChat: (postId: string) => string;
   startBusinessChat: (businessId: string) => string;
   sendChatMessage: (chatId: string, input: string | SendChatMessageInput) => boolean;
   blockChat: (chatId: string) => void;
+  markChatRead: (chatId: string) => void;
   signupBusiness: (input: BusinessSignupInput) => void;
   loginBusiness: (identifier: string, password: string) => string | null;
   logoutBusiness: () => void;
@@ -249,16 +253,13 @@ function normalizeAppState(input: Partial<AppState>): AppState {
   } as Partial<AppState> & { adminAuthenticated?: unknown };
   delete cleanInput.adminAuthenticated;
   const base = cloneInitialState();
-  const migrationTimestamp = createTimestamp();
   const location =
     normalizeUserLocation(input.location, input.location?.source ?? "fallback") ??
     normalizeUserLocation(base.location, "fallback") ??
     fallbackLocation;
   const residents = arrayWithFallback(input.residents, base.residents).map(normalizeResidentPhoto);
   const posts = arrayWithFallback(input.posts, base.posts).map((post) => {
-    const createdAt = normalizeTimestamp(post.createdAt, {
-      migrationNow: migrationTimestamp
-    });
+    const createdAt = normalizeTimestamp(post.createdAt);
     return {
       ...post,
       createdAt,
@@ -266,11 +267,10 @@ function normalizeAppState(input: Partial<AppState>): AppState {
         ? {
             updatedAt: normalizeTimestamp(post.updatedAt, {
               fallback: createdAt,
-              migrationNow: migrationTimestamp
             })
           }
         : {}),
-      location: post.location ?? location,
+      location: post.location ?? createEmptyLocation(),
       interestedUserIds: asArray(post.interestedUserIds),
       acceptedUserIds: asArray(post.acceptedUserIds),
       savedByUserIds: asArray(post.savedByUserIds),
@@ -278,13 +278,11 @@ function normalizeAppState(input: Partial<AppState>): AppState {
         ...comment,
         createdAt: normalizeTimestamp(comment.createdAt, {
           fallback: createdAt,
-          migrationNow: migrationTimestamp
         }),
         ...(comment.updatedAt
           ? {
               updatedAt: normalizeTimestamp(comment.updatedAt, {
                 fallback: createdAt,
-                migrationNow: migrationTimestamp
               })
             }
           : {})
@@ -297,7 +295,6 @@ function normalizeAppState(input: Partial<AppState>): AppState {
     (business) => {
       const createdAt = normalizeTimestamp(
         business.createdAt ?? business.payment?.paidAt,
-        { migrationNow: migrationTimestamp }
       );
       const offers = asArray(business.offers);
       return {
@@ -307,7 +304,6 @@ function normalizeAppState(input: Partial<AppState>): AppState {
           ? {
               updatedAt: normalizeTimestamp(business.updatedAt, {
                 fallback: createdAt,
-                migrationNow: migrationTimestamp
               })
             }
           : {}),
@@ -316,7 +312,6 @@ function normalizeAppState(input: Partial<AppState>): AppState {
             offer,
             normalizeTimestamp(business.offerCreatedAt?.[offer], {
               fallback: createdAt,
-              migrationNow: migrationTimestamp
             })
           ])
         ),
@@ -334,20 +329,17 @@ function normalizeAppState(input: Partial<AppState>): AppState {
   );
   const businessOwners = arrayWithFallback(input.businessOwners, base.businessOwners);
   const chats = arrayWithFallback(input.chats, base.chats).map((chat) => {
-    const messages = asArray(chat.messages).map((message) => ({
+    const messages = orderedMessages(asArray(chat.messages).map((message) => ({
       ...message,
       createdAt: normalizeTimestamp(message.createdAt, {
         fallback: chat.createdAt,
-        migrationNow: migrationTimestamp
       })
-    }));
+    })));
     const createdAt = normalizeTimestamp(chat.createdAt, {
       fallback: messages[0]?.createdAt,
-      migrationNow: migrationTimestamp
     });
     const lastMessageAt = normalizeTimestamp(chat.lastMessageAt, {
       fallback: messages.at(-1)?.createdAt ?? createdAt,
-      migrationNow: migrationTimestamp
     });
     return normalizeChatParticipants(
       {
@@ -355,7 +347,6 @@ function normalizeAppState(input: Partial<AppState>): AppState {
         createdAt,
         updatedAt: normalizeTimestamp(chat.updatedAt, {
           fallback: lastMessageAt,
-          migrationNow: migrationTimestamp
         }),
         lastMessageAt,
         blockedById: chat.status === "Blocked" ? chat.blockedById : undefined,
@@ -380,7 +371,6 @@ function normalizeAppState(input: Partial<AppState>): AppState {
     reports: arrayWithFallback(input.reports, base.reports).map((report) => ({
       ...report,
       createdAt: normalizeTimestamp(report.createdAt, {
-        migrationNow: migrationTimestamp
       })
     })),
     notifications: arrayWithFallback(input.notifications, base.notifications),
@@ -462,7 +452,38 @@ function addMonthDate() {
 export function AppStoreProvider({ children }: { children: ReactNode }) {
   const { notify } = useToast();
   const [hydrated, setHydrated] = useState(false);
-  const [state, setState] = useState<AppState>(() => cloneInitialState());
+  const [state, rawSetState] = useState<AppState>(() => cloneInitialState());
+  const stateRef = useRef(state);
+  const setState = useCallback((action: AppState | ((current: AppState) => AppState)) => {
+    const next = typeof action === "function" ? action(stateRef.current) : action;
+    stateRef.current = next;
+    rawSetState(next);
+  }, []);
+
+  // Persist critical local actions before reporting success. This is browser storage,
+  // not a shared backend. Read the latest shared data to avoid stale-tab mutations.
+  const latestSharedState = useCallback(() => {
+    let saved: Partial<AppState> | null = null;
+    try { saved = readLocalStorage<Partial<AppState>>(STORAGE_KEY); } catch { /* Use memory if storage is unavailable. */ }
+    const current = stateRef.current;
+    if (!saved) return current;
+    const chats = new Map(current.chats.map(chat => [chat.id, chat]));
+    for (const chat of saved.chats ?? []) {
+      const existing = chats.get(chat.id);
+      if (!existing || timestampToMilliseconds(chat.updatedAt) >= timestampToMilliseconds(existing.updatedAt)) chats.set(chat.id, chat);
+    }
+    return { ...current, chats: [...chats.values()], reports: [...new Map([...current.reports, ...(saved.reports ?? [])].map(report => [report.id, report])).values()] };
+  }, []);
+  const commitLocalAction = useCallback((next: AppState) => {
+    try {
+      writeLocalStorage(STORAGE_KEY, getPersistableAppState(next));
+      setState(next);
+      return true;
+    } catch {
+      notify({ title: "Changes could not be saved", description: "Browser storage is unavailable or full. Try again after freeing space.", variant: "warning" });
+      return false;
+    }
+  }, [notify, setState]);
   const [residentNotifications, setResidentNotifications] = useState<SzocialNotification[]>([]);
   const [businessNotifications, setBusinessNotifications] = useState<SzocialNotification[]>([]);
   const skipNextPersistence = useRef(false);
@@ -552,7 +573,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       })
     );
     setHydrated(true);
-  }, []);
+  }, [setState]);
 
   useEffect(() => {
     if (hydrated) {
@@ -570,13 +591,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       try {
         const incoming = mergeState(JSON.parse(event.newValue) as Partial<AppState>);
         setState((current) => {
-          if (JSON.stringify(current.chats) === JSON.stringify(incoming.chats)) {
+          if (JSON.stringify(current.chats) === JSON.stringify(incoming.chats) && JSON.stringify(current.reports) === JSON.stringify(incoming.reports)) {
             return current;
           }
           skipNextPersistence.current = true;
           return {
             ...current,
-            chats: incoming.chats
+            chats: incoming.chats,
+            reports: incoming.reports
           };
         });
       } catch {
@@ -586,7 +608,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
     window.addEventListener("storage", syncChatsFromStorage);
     return () => window.removeEventListener("storage", syncChatsFromStorage);
-  }, []);
+  }, [setState]);
 
   const safeState = useMemo(() => normalizeAppState(state), [state]);
   const storedCurrentUser =
@@ -691,7 +713,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         description: `Showing local activity around ${formatLocation(savedLocation)}.`
       });
     },
-    [notify]
+    [setState, notify]
   );
 
   const signupResident = useCallback(
@@ -749,7 +771,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       notify({ title: "Welcome to Szocial", description: "Your resident profile is ready." });
       return true;
     },
-    [notify, state.residents]
+    [setState, notify, state.residents]
   );
 
   const loginResident = useCallback(
@@ -801,7 +823,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       notify({ title: "Logged in", description: `Good to see you, ${user.name}.` });
       return true;
     },
-    [notify, state.residents]
+    [setState, notify, state.residents]
   );
 
   const logoutResident = useCallback(() => {
@@ -810,7 +832,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       window.localStorage.removeItem(RESIDENT_AUTH_KEY);
     }
     notify({ title: "Logged out", description: "Your local session was cleared." });
-  }, [notify]);
+  }, [setState, notify]);
 
   const updateResidentProfile = useCallback(
     (input: Partial<ResidentUser>) => {
@@ -835,7 +857,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       });
       notify({ title: "Profile updated" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const updatePrivacy = useCallback(
@@ -853,7 +875,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       });
       notify({ title: "Privacy settings saved" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const submitVerification = useCallback(() => {
@@ -913,7 +935,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       });
       notify({ title: "Interest sent", description: "Interest sent to the post creator." });
     },
-    [notify, pushNotification, state.currentUserId, state.posts, state.residents]
+    [setState, notify, pushNotification, state.currentUserId, state.posts, state.residents]
   );
 
   const offerHelp = useCallback(
@@ -972,7 +994,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }
       notify({ title: "Comment added" });
     },
-    [notify, pushNotification, state.currentUserId, state.posts, state.residents]
+    [setState, notify, pushNotification, state.currentUserId, state.posts, state.residents]
   );
 
   const toggleSaveBusiness = useCallback(
@@ -987,17 +1009,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Business saved", description: "Added to your saved local spots." });
     },
-    [notify]
+    [setState, notify]
   );
 
   const createPost = useCallback(
     (input: CreatePostInput) => {
+      if (!state.currentUserId || !input.title.trim() || !input.description.trim() || !normalizeUserLocation(input.location)) {
+        notify({ title: "Post not created", description: "Sign in and provide a title, description and valid location.", variant: "warning" });
+        return "";
+      }
       const id = createId(input.type === "fun" ? "post" : "help");
       const createdAt = createTimestamp();
       const post: LocalPost = {
         id,
         ...input,
-        authorId: state.currentUserId ?? asArray(state.residents)[0]?.id ?? fallbackResident.id,
+        location: normalizeUserLocation(input.location)!,
+        authorId: state.currentUserId,
         createdAt,
         status: "Active",
         interestedUserIds: [],
@@ -1017,7 +1044,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       });
       return id;
     },
-    [notify, state.currentUserId, state.residents]
+    [setState, notify, state.currentUserId]
   );
 
   const updatePost = useCallback(
@@ -1026,19 +1053,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setState((current) => ({
         ...current,
         posts: asArray(current.posts).map((post) =>
-          post.id === postId
-            ? {
-                ...post,
-                ...input,
-                createdAt: post.createdAt,
-                updatedAt
-              }
+          post.id === postId && post.authorId === current.currentUserId
+            ? editPost(post, input, updatedAt)
             : post
         )
       }));
       notify({ title: "Post updated" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const deletePost = useCallback(
@@ -1049,7 +1071,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Post deleted" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const closePost = useCallback(
@@ -1062,33 +1084,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Post closed" });
     },
-    [notify]
-  );
-
-  const markSolved = useCallback(
-    (postId: string) => {
-      setState((current) => ({
-        ...current,
-        posts: asArray(current.posts).map((post) =>
-          post.id === postId ? { ...post, status: "Solved" } : post
-        )
-      }));
-      notify({ title: "Marked as solved" });
-    },
-    [notify]
+    [setState, notify]
   );
 
   const acceptInterestedUser = useCallback(
     (postId: string, userId: string) => {
-      const post = asArray(state.posts).find((item) => item.id === postId);
-      const user = asArray(state.residents).find((item) => item.id === userId);
-      const creatorId = state.currentUserId;
-      if (!post || !user || !creatorId || creatorId === userId) {
+      const post = asArray(stateRef.current.posts).find((item) => item.id === postId);
+      const user = asArray(stateRef.current.residents).find((item) => item.id === userId);
+      const creatorId = stateRef.current.currentUserId;
+      if (!post || !user || !creatorId || creatorId === userId || post.authorId !== creatorId || !post.interestedUserIds.includes(userId)) {
         return "";
       }
 
       const participantIds = [creatorId, userId];
-      const existing = asArray(state.chats).find(
+      if (isPairBlocked(stateRef.current.chats, participantIds)) {
+        notify({ title: "Messaging blocked", variant: "warning" });
+        return "";
+      }
+      const existing = asArray(stateRef.current.chats).find(
         (chat) =>
           chat.postId === postId &&
           chat.status !== "Left" &&
@@ -1162,12 +1175,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       notify({ title: "Request accepted", description: "A chat was created." });
       return chatId;
     },
-    [
+    [setState,
       notify,
-      state.chats,
-      state.currentUserId,
-      state.posts,
-      state.residents
     ]
   );
 
@@ -1186,7 +1195,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Request rejected" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const submitReport = useCallback(
@@ -1196,43 +1205,51 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       itemLabel: string,
       reason: ReportReason
     ) => {
-      const createdAt = createTimestamp();
-      setState((current) => ({
-        ...current,
-        reports: [
-          {
-            id: createId("report"),
-            itemType,
-            itemId,
-            itemLabel,
-            reason,
-            reportedBy: current.currentUserId ?? "user-vishv",
-            status: "Open",
-            createdAt
-          },
-          ...asArray(current.reports)
-        ],
-        posts: itemType === "Post"
-          ? asArray(current.posts).map((post) =>
-              post.id === itemId ? { ...post, reports: (post.reports ?? 0) + 1 } : post
-            )
-          : asArray(current.posts)
-      }));
-      notify({ title: "Report submitted", description: "Thanks for helping keep Szocial safe." });
+      const current = latestSharedState();
+      const reporterId = current.currentBusinessOwnerId ?? current.currentUserId;
+      const chat = current.chats.find(chat => chat.id === itemId);
+      const targetExists = itemType === "Chat" ? Boolean(chat && reporterId && chat.participantIds.includes(reporterId))
+        : itemType === "User" ? current.residents.some(user => user.id === itemId && user.id !== reporterId)
+        : itemType === "Post" ? current.posts.some(post => post.id === itemId && post.status !== "Removed")
+        : current.businesses.some(business => business.id === itemId);
+      const reasons: ReportReason[] = ["Spam", "Fake post", "Unsafe", "Harassment", "Wrong category", "Fake listing", "Wrong location", "Closed permanently", "Other"];
+      if (!reporterId || !targetExists || !reasons.includes(reason)) {
+        notify({ title: "Report unavailable", description: "Sign in and select a valid item and reason.", variant: "warning" });
+        return false;
+      }
+      if (current.reports.some(report => report.reportedBy === reporterId && report.itemType === itemType && report.itemId === itemId && report.status === "Open")) {
+        notify({ title: "Already reported", description: "Your existing report is saved in this browser." });
+        return true;
+      }
+      const saved = commitLocalAction({ ...current,
+        reports: [{ id: createId("report"), itemType, itemId, itemLabel, reason, reportedBy: reporterId,
+          status: "Open", reportedUserIds: itemType === "User" ? [itemId] : itemType === "Chat" ? chat!.participantIds.filter(id => id !== reporterId) : undefined, createdAt: createTimestamp() }, ...current.reports],
+        posts: itemType === "Post" ? current.posts.map(post => post.id === itemId ? { ...post, reports: post.reports + 1 } : post) : current.posts
+      });
+      if (saved) notify({ title: "Report saved locally", description: "Available in this browser's admin panel. No remote moderation service is connected." });
+      return saved;
     },
-    [notify]
+    [notify, latestSharedState, commitLocalAction]
   );
 
   const startPostChat = useCallback(
     (postId: string) => {
-      const sender = asArray(state.residents).find(
-        (user) => user.id === state.currentUserId
+      const sender = asArray(stateRef.current.residents).find(
+        (user) => user.id === stateRef.current.currentUserId
       );
-      const post = asArray(state.posts).find((item) => item.id === postId);
-      const author = asArray(state.residents).find((user) => user.id === post?.authorId);
+      const post = asArray(stateRef.current.posts).find((item) => item.id === postId);
+      const author = asArray(stateRef.current.residents).find((user) => user.id === post?.authorId);
+      if (!sender || !author || !post || post.status !== "Active" || (post.visibility === "Private after approval" && post.authorId !== sender.id && !post.acceptedUserIds.includes(sender.id))) {
+        notify({ title: "Chat unavailable", variant: "warning" });
+        return "";
+      }
       const participantIds =
         sender && author ? [sender.id, author.id] : [];
-      const existing = asArray(state.chats).find(
+      if (isPairBlocked(stateRef.current.chats, participantIds)) {
+        notify({ title: "Messaging blocked", description: "Unblock the existing conversation before starting another.", variant: "warning" });
+        return "";
+      }
+      const existing = asArray(stateRef.current.chats).find(
         (chat) =>
           chat.postId === postId &&
           chat.status !== "Left" &&
@@ -1307,25 +1324,29 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       notify({ title: "Chat opened", description: "Chat started with this neighbour." });
       return chatId;
     },
-    [
+    [setState,
       notify,
       pushNotification,
-      state.chats,
-      state.currentUserId,
-      state.posts,
-      state.residents
     ]
   );
 
   const startBusinessChat = useCallback(
     (businessId: string) => {
-      const sender = asArray(state.residents).find(
-        (user) => user.id === state.currentUserId
+      const sender = asArray(stateRef.current.residents).find(
+        (user) => user.id === stateRef.current.currentUserId
       );
-      const business = asArray(state.businesses).find((item) => item.id === businessId);
+      const business = asArray(stateRef.current.businesses).find((item) => item.id === businessId);
+      if (!sender || !business || business.status !== "Live") {
+        notify({ title: "Chat unavailable", variant: "warning" });
+        return "";
+      }
       const participantIds =
         sender && business ? [sender.id, business.ownerId] : [];
-      const existing = asArray(state.chats).find(
+      if (isPairBlocked(stateRef.current.chats, participantIds)) {
+        notify({ title: "Messaging blocked", description: "Unblock the existing conversation before starting another.", variant: "warning" });
+        return "";
+      }
+      const existing = asArray(stateRef.current.chats).find(
         (chat) =>
           chat.businessId === businessId &&
           chat.status !== "Left" &&
@@ -1396,13 +1417,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       notify({ title: "Business chat opened" });
       return chatId;
     },
-    [
+    [setState,
       notify,
       pushNotification,
-      state.businesses,
-      state.chats,
-      state.currentUserId,
-      state.residents
     ]
   );
 
@@ -1419,20 +1436,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         kind === "location" &&
         (!Number.isFinite(latitude) ||
           !Number.isFinite(longitude) ||
+          Math.abs(latitude ?? Infinity) > 90 || Math.abs(longitude ?? Infinity) > 180 ||
           !mapsUrl?.startsWith("https://www.google.com/maps/"))
       ) {
         return false;
       }
-      const chat = asArray(state.chats).find((item) => item.id === chatId);
-      const senderId = state.currentBusinessOwnerId ?? state.currentUserId;
-      if (
-        !chat ||
-        !senderId ||
-        chat.status !== "Active" ||
-        !asArray(chat.participantIds).includes(senderId)
-      ) {
-        return false;
-      }
+      const snapshot = latestSharedState();
+      const chat = asArray(snapshot.chats).find((item) => item.id === chatId);
+      const senderId = snapshot.currentBusinessOwnerId ?? snapshot.currentUserId;
+      if (!chat || !senderId || !canMessage(snapshot.chats, chat, senderId)) return false;
       const senderResident = asArray(state.residents).find(
         (resident) => resident.id === senderId
       );
@@ -1450,9 +1462,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const senderType = senderOwner ? "business" : "resident";
       const messageId = createId("msg");
       const createdAt = createTimestamp();
-      setState((current) => ({
-        ...current,
-        chats: asArray(current.chats).map((chat) =>
+      const saved = commitLocalAction({
+        ...snapshot,
+        chats: asArray(snapshot.chats).map((chat) =>
           chat.id === chatId
             ? {
                 ...chat,
@@ -1462,7 +1474,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                   ...asArray(chat.messages),
                   {
                     id: messageId,
-                    senderId,
+                    senderId: senderId!,
                     senderType,
                     text: text.trim(),
                     createdAt,
@@ -1480,7 +1492,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
               }
             : chat
         )
-      }));
+      });
+      if (!saved) return false;
 
       if (senderResident && chat.type === "Business") {
         const business = asArray(state.businesses).find(
@@ -1539,21 +1552,33 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       return true;
     },
     [
+      latestSharedState,
+      commitLocalAction,
       pushNotification,
       state.businessOwners,
       state.businesses,
-      state.chats,
-      state.currentBusinessOwnerId,
-      state.currentUserId,
       state.residents
     ]
   );
 
+  const markChatRead = useCallback((chatId: string) => {
+    const current = latestSharedState();
+    const participantId = current.currentBusinessOwnerId ?? current.currentUserId;
+    const chat = current.chats.find(chat => chat.id === chatId);
+    if (!chat || !participantId || !chat.participantIds.includes(participantId)) return;
+    const latest = chat.messages.at(-1)?.createdAt ?? chat.createdAt;
+    if (!latest || timestampToMilliseconds(chat.readAtByParticipant?.[participantId]) >= timestampToMilliseconds(latest)) return;
+    commitLocalAction({ ...current, chats: current.chats.map(item => item.id === chatId ? {
+      ...item, readAtByParticipant: { ...item.readAtByParticipant, [participantId]: createTimestamp() }
+    } : item) });
+  }, [latestSharedState, commitLocalAction]);
+
   const blockChat = useCallback(
     (chatId: string) => {
-      const participantId = state.currentBusinessOwnerId ?? state.currentUserId;
-      const participantType = state.currentBusinessOwnerId ? "business" : "resident";
-      const chat = asArray(state.chats).find((item) => item.id === chatId);
+      const snapshot = latestSharedState();
+      const participantId = snapshot.currentBusinessOwnerId ?? snapshot.currentUserId;
+      const participantType = snapshot.currentBusinessOwnerId ? "business" : "resident";
+      const chat = asArray(snapshot.chats).find((item) => item.id === chatId);
 
       if (
         !chat ||
@@ -1591,9 +1616,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }
 
       const unblocking = chat.status === "Blocked";
-      setState((current) => ({
-        ...current,
-        chats: asArray(current.chats).map((chat) =>
+      const saved = commitLocalAction({
+        ...snapshot,
+        chats: asArray(snapshot.chats).map((chat) =>
           chat.id === chatId
             ? unblocking
               ? {
@@ -1601,18 +1626,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                   status: "Active",
                   blockedById: undefined,
                   blockedByType: undefined,
-                  blockedAt: undefined
+                  blockedAt: undefined,
+                  updatedAt: createTimestamp()
                 }
               : {
                   ...chat,
                   status: "Blocked",
                   blockedById: participantId,
                   blockedByType: participantType,
-                  blockedAt: new Date().toISOString()
+                  updatedAt: createTimestamp(),
+                  blockedAt: createTimestamp()
                 }
             : chat
         )
-      }));
+      });
+      if (!saved) return;
       notify(
         unblocking
           ? {
@@ -1626,10 +1654,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       );
     },
     [
+      latestSharedState,
+      commitLocalAction,
       notify,
-      state.chats,
-      state.currentBusinessOwnerId,
-      state.currentUserId
     ]
   );
 
@@ -1698,7 +1725,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         description: "Choose a listing plan to continue."
       });
     },
-    [notify]
+    [setState, notify]
   );
 
   const getBusinessNextRoute = useCallback(
@@ -1756,7 +1783,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       notify({ title: "Business login successful" });
       return getBusinessNextRoute(owner.id);
     },
-    [getBusinessNextRoute, notify, state.businessOwners]
+    [setState, getBusinessNextRoute, notify, state.businessOwners]
   );
 
   const logoutBusiness = useCallback(() => {
@@ -1765,7 +1792,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       window.localStorage.removeItem(BUSINESS_AUTH_KEY);
     }
     notify({ title: "Business account logged out" });
-  }, [notify]);
+  }, [setState, notify]);
 
   const completeBusinessPayment = useCallback(
     (plan: PaymentPlan, paymentId: string, mock: boolean) => {
@@ -1813,7 +1840,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         description: `${plan.name} is active for your listing.`
       });
     },
-    [notify]
+    [setState, notify]
   );
 
   const failBusinessPayment = useCallback(
@@ -1843,7 +1870,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       writeLocalStorage(BUSINESS_PAYMENT_KEY, "failed");
       notify({ title: "Payment failed", variant: "warning" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const updateBusinessProfile = useCallback(
@@ -1872,7 +1899,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       writeLocalStorage(BUSINESS_PROFILE_COMPLETE_KEY, "true");
       notify({ title: "Business profile saved" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const publishBusiness = useCallback(() => {
@@ -1900,7 +1927,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }));
     notify({ title: "Your business is now live" });
     return true;
-  }, [notify, state.businessOwners, state.currentBusinessOwnerId]);
+  }, [setState, notify, state.businessOwners, state.currentBusinessOwnerId]);
 
   const setCurrentBusinessStatus = useCallback(
     (status: BusinessStatus) => {
@@ -1920,7 +1947,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       });
       notify({ title: `Listing status changed to ${status}` });
     },
-    [notify]
+    [setState, notify]
   );
 
   const addBusinessOffer = useCallback(
@@ -1951,7 +1978,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       });
       notify({ title: "Offer added" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const cancelBusinessPlan = useCallback(() => {
@@ -1979,7 +2006,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     });
     writeLocalStorage(BUSINESS_PAYMENT_KEY, "cancelled");
     notify({ title: "Subscription cancelled", description: "Listing moved to paused." });
-  }, [notify]);
+  }, [setState, notify]);
 
   const setUserStatus = useCallback(
     (userId: string, status: ResidentUser["status"]) => {
@@ -1991,7 +2018,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: `User marked ${status}` });
     },
-    [notify]
+    [setState, notify]
   );
 
   const verifyUser = useCallback(
@@ -2004,7 +2031,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "User verified" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const setBusinessAdminStatus = useCallback(
@@ -2017,7 +2044,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: `Business status changed to ${status}` });
     },
-    [notify]
+    [setState, notify]
   );
 
   const verifyBusiness = useCallback(
@@ -2030,7 +2057,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Business verified" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const featureBusiness = useCallback(
@@ -2043,7 +2070,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Feature status updated" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const setBusinessPaymentStatus = useCallback(
@@ -2076,7 +2103,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: `Payment marked ${status}` });
     },
-    [notify]
+    [setState, notify]
   );
 
   const removePostAdmin = useCallback(
@@ -2089,7 +2116,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Post removed" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const resolveReport = useCallback(
@@ -2102,7 +2129,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       notify({ title: "Report resolved" });
     },
-    [notify]
+    [setState, notify]
   );
 
   const value = useMemo<AppStoreContextValue>(
@@ -2132,7 +2159,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updatePost,
       deletePost,
       closePost,
-      markSolved,
       acceptInterestedUser,
       rejectInterestedUser,
       submitReport,
@@ -2140,6 +2166,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       startBusinessChat,
       sendChatMessage,
       blockChat,
+      markChatRead,
       signupBusiness,
       loginBusiness,
       logoutBusiness,
@@ -2167,6 +2194,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       addBusinessOffer,
       addComment,
       blockChat,
+      markChatRead,
       businessNotifications,
       businessUnreadCount,
       cancelBusinessPlan,
@@ -2188,7 +2216,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       logoutResident,
       markBusinessNotificationsRead,
       markResidentNotificationsRead,
-      markSolved,
       offerHelp,
       publishBusiness,
       rejectInterestedUser,

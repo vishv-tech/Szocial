@@ -38,7 +38,7 @@ export function ReportModal({
 
   return (
     <Modal
-      description="Choose the closest reason. Reports are visible in the admin panel for review."
+      description="Choose the closest reason. Reports are stored in this browser and visible in its admin panel; remote moderation is not connected."
       onClose={onClose}
       open={open}
       title={`Report ${itemType.toLowerCase()}`}
@@ -62,8 +62,7 @@ export function ReportModal({
       <Button
         className="mt-5 w-full"
         onClick={() => {
-          submitReport(itemType, itemId, itemLabel, reason);
-          onClose();
+          if (submitReport(itemType, itemId, itemLabel, reason)) onClose();
         }}
       >
         <Flag className="h-4 w-4" />

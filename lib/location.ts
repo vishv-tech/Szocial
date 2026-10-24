@@ -66,8 +66,11 @@ export function normalizeUserLocation(
     input.source === "gps" || input.source === "manual" || input.source === "fallback"
       ? input.source
       : defaultSource;
-  const latitude = cleanCoordinate(input.latitude ?? input.lat);
-  const longitude = cleanCoordinate(input.longitude ?? input.lng);
+  const lat = cleanCoordinate(input.latitude ?? input.lat);
+  const lng = cleanCoordinate(input.longitude ?? input.lng);
+  const validPair = lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  const latitude = validPair ? lat : null;
+  const longitude = validPair ? lng : null;
   const location: LocationInfo = {
     latitude,
     longitude,

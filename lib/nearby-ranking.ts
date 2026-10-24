@@ -21,52 +21,6 @@ type Coordinates = {
   longitude: number;
 };
 
-const MUMBAI_AREA_PRIORITIES: Record<string, string[][]> = {
-  wadala: [
-    ["Wadala"],
-    ["Dadar", "Matunga", "Five Gardens", "King Circle", "Sion", "Antop Hill"],
-    ["Sewri", "Parel", "Lower Parel", "Prabhadevi", "Mahim"],
-    ["Bandra", "Bandra East", "Bandra West", "Khar", "Kurla", "Chembur"],
-    [
-      "Andheri",
-      "Juhu",
-      "Powai",
-      "Ghatkopar",
-      "Byculla",
-      "Colaba",
-      "Borivali",
-      "Thane",
-      "Navi Mumbai"
-    ]
-  ],
-  bandra: [
-    ["Bandra", "Bandra East", "Bandra West"],
-    ["Khar", "Santacruz", "Mahim"],
-    ["Dadar", "Matunga", "Juhu"],
-    ["Wadala", "Sion", "Andheri"]
-  ],
-  khar: [
-    ["Khar"],
-    ["Bandra", "Bandra East", "Bandra West", "Santacruz"],
-    ["Juhu", "Andheri", "Mahim"],
-    ["Dadar", "Matunga", "Wadala"]
-  ],
-  matunga: [
-    ["Matunga", "Five Gardens", "King Circle"],
-    ["Dadar", "Wadala", "Sion"],
-    ["Parel", "Mahim", "Antop Hill"],
-    ["Bandra", "Bandra East", "Bandra West", "Khar", "Chembur"]
-  ],
-  dadar: [
-    ["Dadar"],
-    ["Matunga", "Wadala", "Prabhadevi", "Parel"],
-    ["Sion", "Mahim", "Lower Parel", "Five Gardens"],
-    ["Bandra", "Bandra East", "Bandra West", "Khar", "Worli"]
-  ]
-};
-
-// This is an MVP locality map for mock/local data. It can be replaced with
-// full coordinate radius queries once listings consistently include lat/lng.
 export function normalizeAreaName(value: unknown) {
   return typeof value === "string"
     ? value
@@ -122,7 +76,7 @@ function getAreaName(value: LocationLike): string {
   return normalizeAreaName(value.area);
 }
 
-function getCoordinates(value: LocationLike): Coordinates | null {
+export function getCoordinates(value: LocationLike): Coordinates | null {
   if (!value || typeof value !== "object") return null;
 
   const nested = "location" in value ? getCoordinates(value.location) : null;
@@ -130,7 +84,7 @@ function getCoordinates(value: LocationLike): Coordinates | null {
 
   const latitude = numberValue(value.latitude);
   const longitude = numberValue(value.longitude);
-  return latitude !== null && longitude !== null ? { latitude, longitude } : null;
+  return latitude !== null && longitude !== null && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 ? { latitude, longitude } : null;
 }
 
 function includesArea(locationText: string, area: string) {
@@ -139,27 +93,7 @@ function includesArea(locationText: string, area: string) {
   return Boolean(normalizedArea && text.includes(` ${normalizedArea} `));
 }
 
-function getPriorityKey(userArea: string) {
-  const normalized = normalizeAreaName(userArea);
-  return Object.keys(MUMBAI_AREA_PRIORITIES).find(
-    (key) => normalized === key || normalized.startsWith(`${key} `)
-  );
-}
-
-export function getMumbaiAreaPriority(userArea: string) {
-  const key = getPriorityKey(userArea);
-  if (!key) return null;
-
-  return MUMBAI_AREA_PRIORITIES[key].reduce<Record<string, number>>(
-    (priorities, areas, score) => {
-      for (const area of areas) priorities[normalizeAreaName(area)] = score;
-      return priorities;
-    },
-    {}
-  );
-}
-
-function haversineDistanceKm(from: Coordinates, to: Coordinates) {
+export function haversineDistanceKm(from: Coordinates, to: Coordinates) {
   const earthRadiusKm = 6371;
   const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
   const latitudeDelta = toRadians(to.latitude - from.latitude);
@@ -172,7 +106,7 @@ function haversineDistanceKm(from: Coordinates, to: Coordinates) {
       Math.cos(toLatitude) *
       Math.sin(longitudeDelta / 2) ** 2;
 
-  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(Math.min(1, value)), Math.sqrt(Math.max(0, 1 - value)));
 }
 
 export function getNearbyScore(userLocation: LocationLike, itemLocation: LocationLike) {
@@ -187,24 +121,18 @@ export function getNearbyScore(userLocation: LocationLike, itemLocation: Locatio
   const normalizedUserArea = getAreaName(userLocation) || normalizeAreaName(userText);
   const normalizedItemArea = getAreaName(itemLocation);
 
-  if (!normalizedUserArea || !itemText) return 99;
-  if (normalizedItemArea === normalizedUserArea) return 0;
-
-  const priorities = getMumbaiAreaPriority(normalizedUserArea);
-  if (priorities) {
-    const rankedAreas = Object.entries(priorities).sort(
-      ([leftArea], [rightArea]) => rightArea.length - leftArea.length
-    );
-    for (const [area, score] of rankedAreas) {
-      if (includesArea(itemText, area)) return score;
-    }
-  }
+  if (!normalizedUserArea || !itemText) return Number.POSITIVE_INFINITY;
 
   const userCity =
     userLocation && typeof userLocation === "object" && "city" in userLocation
       ? normalizeAreaName(userLocation.city)
       : "";
-  return userCity && includesArea(itemText, userCity) ? 5 : 99;
+  const itemCity = itemLocation && typeof itemLocation === "object" && "city" in itemLocation
+    ? normalizeAreaName(itemLocation.city) : "";
+  if (userCity && itemCity && userCity !== itemCity) return Number.POSITIVE_INFINITY;
+  // With no coordinates these are locality tiers, not distances in km.
+  if (normalizedItemArea === normalizedUserArea) return 0;
+  return userCity && includesArea(itemText, userCity) ? 1 : Number.POSITIVE_INFINITY;
 }
 
 export function sortByNearbyRelevance<T>(

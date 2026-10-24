@@ -40,6 +40,9 @@ import { StatCard } from "@/components/StatCard";
 import { useAppStore } from "@/components/AppStoreProvider";
 import { useToast } from "@/components/ToastProvider";
 import type { LocalPost, LocationInfo, ResidentUser } from "@/types";
+import { discoveryPosts, queryPosts, type FeedSort } from "@/lib/feed";
+import { useFeedLocation } from "@/components/useFeedLocation";
+import { FeedSortControl } from "@/components/FeedSortControl";
 import { getLocationName } from "@/lib/location";
 import { sortByNearbyRelevance } from "@/lib/nearby-ranking";
 import { timestampToMilliseconds } from "@/lib/date-time";
@@ -48,7 +51,7 @@ import { getUserDisplayPhoto } from "@/lib/user-photo";
 import { asArray } from "@/lib/utils";
 
 const postTabs = ["All", "Fun", "Help", "Nearby"] as const;
-const helpTabs = ["Need Help", "Offer Help", "Urgent", "Solved"] as const;
+const helpTabs = ["Need Help", "Urgent", "Solved"] as const;
 const myPostTabs = ["Active posts", "Completed posts"] as const;
 const exploreCategories = [
   "All",
@@ -58,8 +61,6 @@ const exploreCategories = [
   "Adventure",
   "Study",
   "Help",
-  "Business",
-  "Events",
   "Nearby"
 ] as const;
 const businessCategories = [
@@ -79,13 +80,7 @@ function textMatch(text: string, query: string) {
 }
 
 function filterPosts(posts: LocalPost[], query: string) {
-  if (!query.trim()) return asArray(posts);
-  return asArray(posts).filter((post) =>
-    [post.title, post.description, post.category, post.location?.area, post.location?.city]
-      .join(" ")
-      .toLowerCase()
-      .includes(query.toLowerCase())
-  );
+  return queryPosts(posts, query, "newest", { area: "", city: "" });
 }
 
 type LegacyPostOwnerFields = LocalPost & {
@@ -169,26 +164,22 @@ function HomeRightPanel() {
 }
 
 export function HomeScreen() {
+  useFeedLocation();
   const { state, currentUser, locationLabel } = useAppStore();
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<FeedSort>("nearby");
   const [tab, setTab] = useState<(typeof postTabs)[number]>("All");
   const [locationOpen, setLocationOpen] = useState(false);
 
   const posts = useMemo(() => {
     let filtered = filterPosts(
-      asArray(state.posts).filter(
-        (post) => isPublishedActivePost(post) && !isCurrentUserPost(post, currentUser.id)
-      ),
+      discoveryPosts(asArray(state.posts), currentUser.id, state.chats),
       query
     );
     if (tab === "Fun") filtered = filtered.filter((post) => post.type === "fun");
     if (tab === "Help") filtered = filtered.filter((post) => post.type === "help");
-    return sortByNearbyRelevance(
-      newestFirst(filtered),
-      state.location,
-      (post) => post
-    );
-  }, [currentUser.id, query, state.location, state.posts, tab]);
+    return queryPosts(filtered, query, sort, state.location);
+  }, [currentUser.id, query, state.location, state.posts, state.chats, sort, tab]);
 
   return (
     <ResidentShell rightPanel={<HomeRightPanel />}>
@@ -206,10 +197,11 @@ export function HomeScreen() {
           <div className="mt-5">
             <SearchBar
               onChange={setQuery}
-              placeholder="Search posts, people, shops, activities..."
+              placeholder="Search keywords or locations..."
               value={query}
             />
           </div>
+          <FeedSortControl value={sort} onChange={setSort} />
           <CategoryTabs className="mt-5" onChange={setTab} tabs={[...postTabs]} value={tab} />
         </section>
         {posts.length ? (
@@ -233,54 +225,26 @@ export function HomeScreen() {
 }
 
 export function ExploreScreen() {
+  useFeedLocation();
   const { state, currentUser, locationLabel } = useAppStore();
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<FeedSort>("nearby");
   const [category, setCategory] = useState<(typeof exploreCategories)[number]>("All");
-  const locationName = getLocationName(state.location);
 
   const featuredPosts = useMemo(() => {
     let posts = filterPosts(
-      asArray(state.posts).filter(
-        (post) => isPublishedActivePost(post) && !isCurrentUserPost(post, currentUser.id)
-      ),
+      discoveryPosts(asArray(state.posts), currentUser.id, state.chats),
       query
     );
     if (category === "Sports") posts = posts.filter((post) => ["Cricket", "Football", "Badminton", "Gym"].includes(post.category));
+    if (category === "Food") posts = posts.filter((post) => ["Cafe", "Food", "Restaurant"].includes(post.category));
     if (category === "Movies") posts = posts.filter((post) => post.category === "Movie");
     if (category === "Adventure") posts = posts.filter((post) => post.category === "Hiking");
     if (category === "Study") posts = posts.filter((post) => ["Study", "Tutor"].includes(post.category));
     if (category === "Help") posts = posts.filter((post) => post.type === "help");
-    return sortByNearbyRelevance(
-      newestFirst(posts),
-      state.location,
-      (post) => post
-    ).slice(0, 3);
-  }, [category, currentUser.id, query, state.location, state.posts]);
+    return queryPosts(posts, query, sort, state.location);
+  }, [category, currentUser.id, query, state.location, state.posts, state.chats, sort]);
 
-  const businesses = sortByNearbyRelevance(
-    newestFirst(
-      asArray(state.businesses).filter(
-        (business) =>
-          business.status === "Live" &&
-          (category === "All" || category === "Business" || category === "Food" || category === "Nearby") &&
-          textMatch(`${business.name} ${business.category} ${business.about}`, query)
-      )
-    ),
-    state.location,
-    (business) => business
-  );
-  const popularHelpPosts = sortByNearbyRelevance(
-    newestFirst(
-      asArray(state.posts).filter(
-        (post) =>
-          post.type === "help" &&
-          isPublishedActivePost(post) &&
-          !isCurrentUserPost(post, currentUser.id)
-      )
-    ),
-    state.location,
-    (post) => post
-  );
 
   return (
     <ResidentShell>
@@ -291,13 +255,14 @@ export function ExploreScreen() {
             Everything local around {locationLabel}
           </h1>
           <div className="mt-5">
-            <SearchBar onChange={setQuery} placeholder="Search activities, help, businesses..." value={query} />
+            <SearchBar onChange={setQuery} placeholder="Search keywords or locations..." value={query} />
           </div>
+          <FeedSortControl value={sort} onChange={setSort} />
           <CategoryTabs className="mt-5" onChange={setCategory} tabs={[...exploreCategories]} value={category} />
         </section>
 
         <section>
-          <h2 className="mb-4 text-xl font-bold text-szocial-ink">Featured local plans</h2>
+          <h2 className="mb-4 text-xl font-bold text-szocial-ink">Local posts</h2>
           <div className="space-y-5">
             {asArray(featuredPosts).map((post) => (
               <PostCard key={post.id} post={post} />
@@ -305,54 +270,19 @@ export function ExploreScreen() {
           </div>
         </section>
 
-        <section>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-xl font-bold text-szocial-ink">
-              {locationName ? `New in ${locationName}` : "New near you"}
-            </h2>
-            <Button href="/businesses" size="sm" variant="outline">
-              View all
-            </Button>
+        {!featuredPosts.length ? <EmptyState title="No posts found" description="Try another location or keyword." icon={<Search className="h-6 w-6" />} /> : null}
+        {!query.trim() ? <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-soft">
+          <h2 className="text-xl font-bold text-szocial-ink">Recommended neighbours</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {asArray(state.residents).filter(resident => resident.id !== currentUser.id && resident.status === "Active" &&
+              !state.chats.some(chat => chat.status === "Blocked" && chat.participantIds.includes(currentUser.id) && chat.participantIds.includes(resident.id)))
+              .slice(0, 3).map(resident => <div className="flex items-center gap-3 rounded-2xl bg-szocial-mist p-3" key={resident.id}>
+                <img alt={resident.name} className="h-11 w-11 rounded-xl object-cover" src={getUserDisplayPhoto(resident)} />
+                <div className="min-w-0 flex-1"><p className="truncate font-semibold text-szocial-ink">{resident.name}</p><p className="text-sm text-szocial-muted">{resident.location.area}</p></div>
+                {resident.verified ? <BadgeCheck className="h-5 w-5 text-szocial-teal" /> : null}
+              </div>)}
           </div>
-          <div className="grid gap-5 lg:grid-cols-2">
-            {asArray(businesses).slice(0, 2).map((business) => (
-              <BusinessCard business={business} key={business.id} />
-            ))}
-          </div>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-soft">
-            <h2 className="text-xl font-bold text-szocial-ink">Popular help requests</h2>
-            <div className="mt-4 space-y-3">
-              {popularHelpPosts
-                .slice(0, 3)
-                .map((post) => (
-                  <Link className="block rounded-2xl bg-szocial-mist p-4" href="/help" key={post.id}>
-                    <p className="font-semibold text-szocial-ink">{post.title}</p>
-                    <p className="mt-1 text-sm text-szocial-muted">
-                      {post.location.area} - <RelativeTime timestamp={post.createdAt} />
-                    </p>
-                  </Link>
-                ))}
-            </div>
-          </div>
-          <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-soft">
-            <h2 className="text-xl font-bold text-szocial-ink">Recommended neighbours</h2>
-            <div className="mt-4 space-y-3">
-              {asArray(state.residents).slice(1, 4).map((resident) => (
-                <div className="flex items-center gap-3 rounded-2xl bg-szocial-mist p-3" key={resident.id}>
-                  <img alt={resident.name} className="h-11 w-11 rounded-xl object-cover" src={getUserDisplayPhoto(resident)} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-szocial-ink">{resident.name}</p>
-                    <p className="text-sm text-szocial-muted">{resident.location.area}</p>
-                  </div>
-                  {resident.verified ? <BadgeCheck className="h-5 w-5 text-szocial-teal" /> : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+        </section> : null}
       </div>
     </ResidentShell>
   );
@@ -428,7 +358,7 @@ export function CreatePostScreen() {
       notify({ title: "Please fill the required fields", variant: "warning" });
       return;
     }
-    createPost(buildInput());
+    if (!createPost(buildInput())) return;
     router.push(mode === "help" ? "/help" : "/home");
   };
 
@@ -593,7 +523,7 @@ export function CreatePostScreen() {
               )}
               <label className="block">
                 <span className="text-sm font-semibold text-szocial-ink">Area *</span>
-                <input className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal" onChange={(event) => setLocation({ ...location, area: event.target.value })} value={location.area} />
+                <input className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-szocial-teal" onChange={(event) => setLocation({ ...location, area: event.target.value, latitude: null, longitude: null, source: "manual" })} value={location.area} />
               </label>
               <label className="block">
                 <span className="text-sm font-semibold text-szocial-ink">Landmark</span>
@@ -615,17 +545,7 @@ export function CreatePostScreen() {
               <Button onClick={() => router.push("/home")} variant="ghost">
                 Cancel
               </Button>
-              {mode === "help" ? (
-                <Button
-                  className="sm:col-span-2"
-                  onClick={() => {
-                    notify({ title: "Available after publishing", description: "Use My Posts to mark a real help post as solved." });
-                  }}
-                  variant="outline"
-                >
-                  Mark as Solved
-                </Button>
-              ) : null}
+
             </div>
           </section>
         ) : null}
@@ -635,11 +555,14 @@ export function CreatePostScreen() {
 }
 
 export function HelpScreen() {
-  const { state, locationLabel } = useAppStore();
+  useFeedLocation();
+  const { state, currentUser, locationLabel } = useAppStore();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<(typeof helpTabs)[number]>("Need Help");
   const helpPosts = useMemo(() => {
-    let posts = filterPosts(asArray(state.posts).filter((post) => post.type === "help"), query);
+    let posts = queryPosts(
+      discoveryPosts(asArray(state.posts), currentUser.id, state.chats, tab === "Solved")
+        .filter(post => post.type === "help"), query, "nearby", state.location);
     if (tab === "Urgent") posts = posts.filter((post) => post.urgency === "Urgent");
     if (tab === "Solved") posts = posts.filter((post) => post.status === "Solved");
     if (tab === "Need Help") posts = posts.filter((post) => post.status === "Active");
@@ -648,7 +571,7 @@ export function HelpScreen() {
       state.location,
       (post) => post
     );
-  }, [query, state.location, state.posts, tab]);
+  }, [query, state.location, state.posts, state.chats, currentUser.id, tab]);
 
   return (
     <ResidentShell>
@@ -659,7 +582,7 @@ export function HelpScreen() {
               <h1 className="text-3xl font-bold tracking-normal text-szocial-ink">
                 {getLocationName(state.location) ? `Help around ${locationLabel}` : "Help near you"}
               </h1>
-              <p className="mt-2 text-szocial-muted">Requests, offers, and urgent local support.</p>
+              <p className="mt-2 text-szocial-muted">Requests and urgent local support.</p>
             </div>
             <Button href="/post?type=help">
               <HeartHandshake className="h-4 w-4" />
@@ -671,36 +594,6 @@ export function HelpScreen() {
           </div>
           <CategoryTabs className="mt-5" onChange={setTab} tabs={[...helpTabs]} value={tab} />
         </section>
-        {tab === "Offer Help" ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {asArray(state.residents).slice(0, 4).map((resident) => (
-              <article className="rounded-3xl border border-slate-100 bg-white p-5 shadow-soft" key={resident.id}>
-                <div className="flex items-center gap-3">
-                  <img alt={resident.name} className="h-14 w-14 rounded-2xl object-cover" src={getUserDisplayPhoto(resident)} />
-                  <div>
-                    <h2 className="font-bold text-szocial-ink">{resident.name}</h2>
-                    <p className="text-sm text-szocial-muted">{resident.location.area}</p>
-                  </div>
-                </div>
-                <p className="mt-4 text-sm leading-6 text-szocial-muted">
-                  Available for recommendations, quick errands, and local introductions.
-                </p>
-                <Button className="mt-4 w-full" href="/chats" variant="outline">
-                  Message
-                </Button>
-              </article>
-            ))}
-            {!asArray(state.residents).length ? (
-              <div className="md:col-span-2">
-                <EmptyState
-                  description="No neighbours are available in mock data yet."
-                  icon={<UsersRound className="h-6 w-6" />}
-                  title="No helpers found"
-                />
-              </div>
-            ) : null}
-          </div>
-        ) : (
           <div className="space-y-5">
             {asArray(helpPosts).map((post) => (
               <HelpCard key={post.id} request={post} />
@@ -714,7 +607,6 @@ export function HelpScreen() {
               />
             ) : null}
           </div>
-        )}
       </div>
     </ResidentShell>
   );
@@ -722,25 +614,29 @@ export function HelpScreen() {
 
 export function ChatsScreen() {
   const searchParams = useSearchParams();
-  const { currentUser, state } = useAppStore();
+  const { state } = useAppStore();
   const chats = useMemo(
     () =>
       asArray(state.chats)
         .filter((chat) =>
-          asArray(chat.participantIds).includes(currentUser.id)
+          Boolean(state.currentUserId) && asArray(chat.participantIds).includes(state.currentUserId ?? "")
         )
         .sort(
           (left, right) =>
             timestampToMilliseconds(right.lastMessageAt) -
             timestampToMilliseconds(left.lastMessageAt)
         ),
-    [currentUser.id, state.chats]
+    [state.currentUserId, state.chats]
   );
   const requestedChatId = searchParams.get("chatId");
   const initial =
     chats.find((chat) => chat.id === requestedChatId)?.id ?? chats[0]?.id ?? null;
   const [activeChatId, setActiveChatId] = useState<string | null>(initial);
   const activeChat = chats.find((chat) => chat.id === activeChatId) ?? null;
+
+  useEffect(() => {
+    if (requestedChatId && chats.some(chat => chat.id === requestedChatId)) setActiveChatId(requestedChatId);
+  }, [requestedChatId, chats]);
 
   useEffect(() => {
     if (!activeChatId || !chats.some((chat) => chat.id === activeChatId)) {
@@ -757,7 +653,7 @@ export function ChatsScreen() {
             Active chats, event groups, business chats, and help request conversations.
           </p>
         </section>
-        <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
           <section className="rounded-3xl border border-slate-100 bg-white p-3 shadow-soft">
             <ChatList activeChatId={activeChatId} chats={chats} onSelect={setActiveChatId} />
           </section>
@@ -769,7 +665,7 @@ export function ChatsScreen() {
 }
 
 export function MyPostsScreen() {
-  const { state, currentUser, deletePost, closePost, markSolved, acceptInterestedUser, rejectInterestedUser } = useAppStore();
+  const { state, currentUser, deletePost, closePost, acceptInterestedUser, rejectInterestedUser } = useAppStore();
   const [tab, setTab] = useState<(typeof myPostTabs)[number]>("Active posts");
   const [interestedPost, setInterestedPost] = useState<LocalPost | null>(null);
   const ownPosts = newestFirst(
@@ -813,7 +709,7 @@ export function MyPostsScreen() {
                     <Trash2 className="h-4 w-4" />
                     Delete Post
                   </Button>
-                  <Button onClick={() => (post.type === "help" ? markSolved(post.id) : closePost(post.id))} variant="outline">
+                  <Button onClick={() => closePost(post.id)} variant="outline">
                     <CheckCircle2 className="h-4 w-4" />
                     Close Post
                   </Button>

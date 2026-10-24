@@ -2,6 +2,7 @@
 
 import { BadgeCheck } from "lucide-react";
 import { useAppStore } from "@/components/AppStoreProvider";
+import { unreadMessages } from "@/lib/chat-rules";
 import { RelativeTime } from "@/components/RelativeTime";
 import { getOtherChatParticipant } from "@/lib/chat-participants";
 import { timestampToMilliseconds } from "@/lib/date-time";
@@ -29,13 +30,14 @@ export function ChatList({ chats, activeChatId, onSelect }: ChatListProps) {
   return (
     <div className="space-y-2">
       {asArray(chats)
-        .filter((chat) => chat.status !== "Left")
+        .filter((chat) => chat.status !== "Left" && chat.participantIds.includes(currentParticipantId ?? ""))
         .sort(
           (left, right) =>
             timestampToMilliseconds(right.lastMessageAt) -
             timestampToMilliseconds(left.lastMessageAt)
         )
         .map((chat) => {
+          const unread = unreadMessages(chat, currentParticipantId);
           const participant = getOtherChatParticipant(
             chat,
             currentParticipantId,
@@ -83,9 +85,9 @@ export function ChatList({ chats, activeChatId, onSelect }: ChatListProps) {
                   />
                 </div>
               </div>
-              {chat.unread ? (
+              {unread ? (
                 <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-szocial-orange px-2 text-xs font-bold text-white">
-                  {chat.unread}
+                  {unread}
                 </span>
               ) : null}
             </button>

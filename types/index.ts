@@ -196,6 +196,7 @@ export type Chat = {
   businessId?: string;
   postId?: string;
   unread: number;
+  readAtByParticipant?: Record<string, string>;
   messages: ChatMessage[];
 };
 
@@ -217,6 +218,7 @@ export type Report = {
   itemLabel: string;
   reason: ReportReason;
   reportedBy: string;
+  reportedUserIds?: string[];
   status: "Open" | "Resolved";
   createdAt: string;
 };
