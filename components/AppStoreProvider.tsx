@@ -5,9 +5,10 @@ import type { AppState, BusinessStatus, ReportReason, ResidentUser, SzocialNotif
 import type { BusinessProfileInput, BusinessSignupInput, CreatePostInput, ResidentSignupInput, SendChatMessageInput } from "@/lib/store-inputs";
 import { createEmptyLocation, formatUserLocation, normalizeUserLocation } from "@/lib/location";
 import { createInitialsAvatar } from "@/lib/user-photo";
-import { api, uploadImage, deleteImage } from "@/lib/client-api";
+import { ApiError, api, uploadImage, deleteImage } from "@/lib/client-api";
 import { browserSupabase } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import type {SignupOutcome} from "@/lib/auth-flow";
 import { retireLegacyCredentials } from "@/lib/resident-auth";
 import { useToast } from "@/components/ToastProvider";
 
@@ -61,27 +62,27 @@ function useStoreValue() {
   try{await api('/api/auth/'+action,body);await reload();return true;}
   catch(e){notify({title:'Authentication failed',description:e instanceof Error?e.message:'Try again',variant:'warning'});return false;}
  };
- const signupResident=async(input:ResidentSignupInput)=>{
-  if(!await auth('signup',{email:input.email,password:input.password,name:input.name}))return false;
-  const {data:{user}}=await browserSupabase().auth.getUser();
-  if(!user){notify({title:'Check your email',description:'Verify your address, then sign in to complete your profile.'});return false;}
-  let photo:string|undefined;
-  if(input.profilePhoto){try{photo=await uploadImage(input.profilePhoto,'avatar');}catch(e){notify({title:'Account created; photo upload pending',description:e instanceof Error?e.message:'Add your photo from Profile.',variant:'warning'});}}
-  return Boolean(await run('profile',{name:input.name,mobile:input.mobile,age:input.age,gender:input.gender,location:input.location,...(photo?{profilePhoto:photo}:{})}));
+ const [signupDraft,setSignupDraft]=useState<{name:string;email:string;location:AppState['location'];profilePhoto?:string;mobile?:string;age?:number;gender?:ResidentUser['gender'];businessName?:string;address?:string;category?:BusinessSignupInput['category']}|null>(null);
+ const signupLock=useRef(false),acceptedSignup=useRef(new Map<string,SignupOutcome>());
+ const signup=async(email:string,password:string,name:string,business:boolean,draft:NonNullable<typeof signupDraft>):Promise<SignupOutcome>=>{
+  const key=email.trim().toLowerCase();const accepted=acceptedSignup.current.get(key);if(accepted)return accepted;
+  if(signupLock.current)return {outcome:'rejected',message:'Account creation is already in progress.'};
+  signupLock.current=true;
+  try{
+   const result=await api<Extract<SignupOutcome,{next:string}>>('/api/auth/signup',{email,password,name,business});
+   if(result.outcome!=='confirmation_required'&&result.outcome!=='authenticated')return {outcome:'uncertain',message:'We could not confirm the result. Check your inbox or try signing in before submitting again.'};
+   acceptedSignup.current.set(key,result);setSignupDraft(draft);
+   if(result.outcome==='authenticated')await reload();
+   return result;
+  }catch(error){const outcome=error instanceof ApiError&&(error.status===429||error.outcome==='rate_limited')?'rate_limited':error instanceof ApiError&&error.outcome==='rejected'?'rejected':'uncertain';return {outcome,message:outcome==='uncertain'?'We could not confirm the result. Check your inbox or try signing in before submitting another signup.':error instanceof Error?error.message:'Please try again later.',retryAfter:error instanceof ApiError?error.retryAfter:undefined};}
+  finally{signupLock.current=false;}
  };
- const loginResident=async(email:string,password:string)=>auth('login',{email,password});
- const logoutResident=async()=>{if(!await auth('logout',{}))return false;setState(emptyState());setNotifications([]);return true;};
- const signupBusiness=async(input:BusinessSignupInput)=>{
-  if(!await auth('signup',{email:input.email,password:input.password,name:input.ownerName}))return false;
-  const {data:{user}}=await browserSupabase().auth.getUser();
-  if(!user){notify({title:'Verify your email',description:'After verification, choose business setup on the onboarding page.'});return false;}
-  return Boolean(await run('create_business',{businessName:input.businessName,category:input.category,address:input.address,location:input.location}));
- };
- const loginBusiness=async(email:string,password:string)=>{
-  if(!await loginResident(email,password))return null;
-  const snapshot=await api<Snapshot>('/api/app');
-  return snapshot.state.businessOwners.length?'/business/dashboard':'/onboarding?business=1';
- };
+ const signupResident=async(input:ResidentSignupInput)=>signup(input.email,input.password,input.name,false,{name:input.name,email:input.email,location:input.location,profilePhoto:input.profilePhoto,mobile:input.mobile,age:input.age,gender:input.gender});
+ const signupBusiness=async(input:BusinessSignupInput)=>signup(input.email,input.password,input.ownerName,true,{name:input.ownerName,email:input.email,location:input.location,businessName:input.businessName,address:input.address,category:input.category});
+ const login=async(email:string,password:string,business=false)=>{try{const result=await api<{next:string}>('/api/auth/login',{email,password,business});await reload();return result.next;}catch(error){notify({title:'Authentication failed',description:error instanceof Error?error.message:'Please try again.',variant:'warning'});return null;}};
+ const loginResident=async(email:string,password:string)=>login(email,password);
+ const logoutResident=async()=>{if(!await auth('logout',{}))return false;setState(emptyState());setNotifications([]);setSignupDraft(null);return true;};
+ const loginBusiness=async(email:string,password:string)=>login(email,password,true);
  const updateResidentProfile=async(input:Partial<ResidentUser>)=>{
   try{
    const changes={...input};
@@ -119,7 +120,7 @@ function useStoreValue() {
  const markChatRead=useCallback(async(id:string)=>{const chat=state.chats.find(c=>c.id===id);const actor=state.currentBusinessOwnerId??state.currentUserId;if(!chat||!actor)return;const read=chat.readAtByParticipant?.[actor];if(read&&read>=(chat.lastMessageAt??''))return;await run('read_chat',{id});},[run,state.chats,state.currentUserId,state.currentBusinessOwnerId]);
  const submitReport=async(itemType:'Post'|'User'|'Business'|'Chat',id:string,itemLabel:string,reason:ReportReason)=>Boolean(await run('report',{id,itemType,itemLabel,reason}));
  const residentNotifications=state.currentBusinessOwnerId?[]:notifications,businessNotifications=state.currentBusinessOwnerId?notifications:[];
- return {state,hydrated,error,revision,roles,onboardingComplete,reload,currentUser,currentBusinessOwner,currentBusiness,locationLabel:formatUserLocation(state.location),residentNotifications,businessNotifications,
+ return {state,hydrated,error,revision,roles,onboardingComplete,signupDraft,reload,currentUser,currentBusinessOwner,currentBusiness,locationLabel:formatUserLocation(state.location),residentNotifications,businessNotifications,
   residentUnreadCount:residentNotifications.filter(n=>!n.isRead).length,businessUnreadCount:businessNotifications.filter(n=>!n.isRead).length,
   setLocation,signupResident,loginResident,logoutResident,signupBusiness,loginBusiness,logoutBusiness:logoutResident,updateResidentProfile,
   updatePrivacy:async(privacy:ResidentUser['privacy'])=>updateResidentProfile({privacy}),submitVerification:async()=>run('verification_request'),

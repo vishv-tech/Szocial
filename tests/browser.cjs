@@ -27,17 +27,18 @@ let auth,app,browser,log;let failSend=false,createdPosts=0;
    if(req.url.startsWith('/auth/v1/token'))res.end(JSON.stringify({access_token:jwt,refresh_token:'test-only-refresh',expires_in:3600,token_type:'bearer',user:authUser}));
    else if(req.url.startsWith('/auth/v1/user'))res.end(JSON.stringify(authUser));
    else if(req.url.startsWith('/auth/v1/logout'))res.end('{}');
+   else if(req.url.startsWith('/rest/v1/profile_private'))res.end(JSON.stringify({onboarding_complete:true}));
    else if(req.url.startsWith('/rest/v1/profiles'))res.end(JSON.stringify(req.headers.accept?.includes('object')?{account_status:'Active'}:[{account_status:'Active'}]));
    else if(req.url.startsWith('/rest/v1/account_roles'))res.end(JSON.stringify([{role:'resident'}]));
    else res.end('[]');
   });await new Promise(resolve=>auth.listen(54329,'127.0.0.1',resolve));
   log=fs.openSync('/tmp/szocial-browser-server.log','w');
   app=spawn(process.execPath,['node_modules/next/dist/bin/next','dev','--hostname','127.0.0.1','--port','3010'],{stdio:['ignore',log,log],env:{...process.env,NEXT_PUBLIC_SUPABASE_URL:'http://127.0.0.1:54329',NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:'test-only-publishable',SUPABASE_SECRET_KEY:''}});
-  let ready=false;for(let n=0;n<90;n++){try{if((await fetch('http://127.0.0.1:3010/login')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,500));}assert.ok(ready,'Next test server started');
+  let ready=false;for(let n=0;n<90;n++){try{if((await fetch('http://localhost:3010/login')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,500));}assert.ok(ready,'Next test server started');
   browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']});
   const context=await browser.newContext({viewport:{width:390,height:844},timezoneId:'Asia/Kolkata'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));const navigate=async path=>{await page.evaluate(path=>window.location.assign(path),path);await page.waitForURL('**'+path);};
   await page.addInitScript(()=>{localStorage.setItem('szocial_auth','true');localStorage.setItem('szocial_user',JSON.stringify({id:'user-vishv',role:'admin'}));});
-  await page.goto('http://127.0.0.1:3010/home');await page.getByRole('heading',{name:'Resident login',exact:true}).waitFor();
+  await page.goto('http://localhost:3010/home');await page.getByRole('heading',{name:'Resident login',exact:true}).waitFor();
   console.log('PASS legacy localStorage flags do not authenticate');
   await page.route('**/api/app',async route=>{
    if(route.request().method()==='POST'){

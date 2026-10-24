@@ -773,7 +773,9 @@ export function ProfileScreen() {
     asArray(post.interestedUserIds).includes(currentUser.id)
   );
 
+  const photoSelection=useRef(0);
   const selectProfilePhoto = async (file?: File) => {
+    const selection=++photoSelection.current;
     if (!file) return;
 
     const validationMessage = validateProfileImageFile(file);
@@ -784,6 +786,7 @@ export function ProfileScreen() {
 
     try {
       const src = await loadImageFromFile(file);
+      if(selection!==photoSelection.current)return;
       setPendingPhoto({ fileName: file.name, src });
     } catch {
       notify({ title: "Could not load this image. Try another photo.", variant: "warning" });

@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "node --test --test-isolation=none tests/*.test.cjs",
-    "test:browser": "node tests/browser.cjs",
+    "test:browser": "node tests/browser.cjs && node tests/auth-browser.cjs",
     "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {

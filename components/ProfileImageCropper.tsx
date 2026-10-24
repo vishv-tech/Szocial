@@ -14,6 +14,7 @@ import { Modal } from "@/components/Modal";
 import {
   clampProfileImagePosition,
   cropImageToSquare,
+  loadImageElement,
   getProfileImageRenderedSize
 } from "@/lib/image-crop";
 import { cn } from "@/lib/utils";
@@ -24,7 +25,7 @@ type ProfileImageCropperProps = {
   fileName: string;
   onCancel: () => void;
   onError: (message: string) => void;
-  onUsePhoto: (croppedPhoto: string) => void;
+  onUsePhoto: (croppedPhoto: string) => void | Promise<void>;
 };
 
 type ImageSize = {
@@ -49,13 +50,6 @@ const PREVIEW_SIZE = 96;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 
-function toImageSize(image: HTMLImageElement): ImageSize {
-  return {
-    height: image.naturalHeight,
-    width: image.naturalWidth
-  };
-}
-
 export function ProfileImageCropper({
   open,
   imageSrc,
@@ -66,7 +60,9 @@ export function ProfileImageCropper({
 }: ProfileImageCropperProps) {
   const cropBoxRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const imageErrorHandledRef = useRef(false);
+  const errorCallback=useRef(onError);errorCallback.current=onError;
+  const applyLock=useRef(false),generation=useRef(0);
+  const [loadError,setLoadError]=useState("");
   const [cropSize, setCropSize] = useState(DEFAULT_CROP_SIZE);
   const [imageSize, setImageSize] = useState<ImageSize | null>(null);
   const [position, setPosition] = useState<CropPosition>({ x: 0, y: 0 });
@@ -109,19 +105,17 @@ export function ProfileImageCropper({
     observer.observe(cropBox);
 
     return () => observer.disconnect();
-  }, [open]);
+  }, [open,imageSrc]);
 
   useEffect(() => {
-    if (!open) return;
-
-    dragRef.current = null;
-    imageErrorHandledRef.current = false;
-    setImageSize(null);
-    setPosition({ x: 0, y: 0 });
-    setZoom(MIN_ZOOM);
-    setDragging(false);
-    setApplying(false);
-  }, [imageSrc, open]);
+    const request=++generation.current,abort=new AbortController();
+    dragRef.current=null;applyLock.current=false;
+    setImageSize(null);setLoadError('');setPosition({x:0,y:0});setZoom(MIN_ZOOM);setDragging(false);setApplying(false);
+    if(open&&imageSrc)void loadImageElement(imageSrc,abort.signal).then(image=>{
+      if(request===generation.current&&!abort.signal.aborted)setImageSize({width:image.naturalWidth,height:image.naturalHeight});
+    }).catch(error=>{if(!abort.signal.aborted&&request===generation.current){const message=error instanceof Error?error.message:'Could not decode this image. Choose another photo.';setLoadError(message);errorCallback.current(message);}});
+    return()=>{generation.current=request+1;abort.abort();};
+  },[imageSrc,open]);
 
   useEffect(() => {
     setPosition((current) => clampPosition(current, zoom));
@@ -131,7 +125,7 @@ export function ProfileImageCropper({
     if (!open) return undefined;
 
     const cancelOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
+      if (event.key === "Escape"&&!applyLock.current) onCancel();
     };
 
     window.addEventListener("keydown", cancelOnEscape);
@@ -193,13 +187,6 @@ export function ProfileImageCropper({
     [position.x, position.y, previewScale]
   );
 
-  const handleImageError = useCallback(() => {
-    if (imageErrorHandledRef.current) return;
-    imageErrorHandledRef.current = true;
-    onError("Could not load this image. Try another photo.");
-    onCancel();
-  }, [onCancel, onError]);
-
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!imageSize || applying) return;
 
@@ -252,11 +239,11 @@ export function ProfileImageCropper({
 
   const applyCrop = async () => {
     if (!imageSize) {
-      handleImageError();
       return;
     }
 
-    setApplying(true);
+    if(applyLock.current)return;applyLock.current=true;
+    const request=generation.current;setApplying(true);
     try {
       const croppedPhoto = await cropImageToSquare(imageSrc, {
         cropSize,
@@ -264,21 +251,21 @@ export function ProfileImageCropper({
         positionY: position.y,
         zoom
       });
-      onUsePhoto(croppedPhoto);
+      if(request===generation.current)await onUsePhoto(croppedPhoto);
     } catch {
       onError("Could not load this image. Try another photo.");
-      setApplying(false);
-    }
+    }finally{applyLock.current=false;if(request===generation.current)setApplying(false);}
   };
 
   return (
     <Modal
       className="sm:max-w-xl"
       description="Adjust your photo so your face appears clearly in the circle."
-      onClose={onCancel}
+      onClose={()=>{if(!applyLock.current)onCancel();}}
       open={open}
       title="Crop profile photo"
     >
+      {loadError?<p role="alert" className="mb-3 text-sm text-red-600">{loadError} Cancel and choose another photo.</p>:!imageSize?<p role="status" className="mb-3 text-sm">Loading photo…</p>:null}
       <div className="grid gap-5 md:grid-cols-[1fr_120px]">
         <div className="space-y-4">
           <div
@@ -288,6 +275,7 @@ export function ProfileImageCropper({
               imageSize && !applying ? "cursor-grab" : "cursor-default",
               dragging ? "cursor-grabbing" : ""
             )}
+            onKeyDown={event=>{if(!imageSize||applying)return;const step=event.shiftKey?20:10,delta:Record<string,[number,number]>={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]};const move=delta[event.key];if(move){event.preventDefault();setPosition(current=>clampPosition({x:current.x+move[0],y:current.y+move[1]}));}}}
             onPointerCancel={endDrag}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -306,20 +294,10 @@ export function ProfileImageCropper({
                   alt=""
                   className="max-w-none select-none"
                   draggable={false}
-                  onError={handleImageError}
-                  onLoad={(event) => setImageSize(toImageSize(event.currentTarget))}
                   src={imageSrc}
                   style={imageStyle}
                 />
               </div>
-            ) : imageSrc ? (
-              <img
-                alt=""
-                className="sr-only"
-                onError={handleImageError}
-                onLoad={(event) => setImageSize(toImageSize(event.currentTarget))}
-                src={imageSrc}
-              />
             ) : null}
             <div className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-inset ring-white/95" />
           </div>
@@ -337,7 +315,7 @@ export function ProfileImageCropper({
               value={zoom}
             />
           </label>
-          <p className="truncate text-xs text-szocial-muted">{fileName}</p>
+          <p className="truncate text-xs text-szocial-muted">{fileName}</p><p className="text-xs text-szocial-muted">Drag the photo or focus the crop area and use arrow keys to move it.</p>
         </div>
         <div className="flex flex-row items-center gap-4 md:flex-col md:items-start">
           <div>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useRef, useState } from "react";
 import { Building2, LocateFixed, LockKeyhole, MapPin, UserPlus } from "lucide-react";
+import {useSignupSubmission} from "@/components/useSignupSubmission";
 import { SocialAuthButtons } from "@/components/SocialAuthButtons";
 import { AuthLayout } from "@/components/AuthLayout";
 import { Button } from "@/components/Button";
@@ -158,7 +159,7 @@ function useLocationCapture(initial?: LocationInfo) {
 }
 
 export function ResidentSignupScreen() {
-  const router = useRouter();
+  const submission=useSignupSubmission();
   const { signupResident } = useAppStore();
   const { notify } = useToast();
   const { location, setLocation, manual, setManual, detect } = useLocationCapture();
@@ -181,7 +182,9 @@ export function ResidentSignupScreen() {
     if (manualLocation) saveUserLocation(manualLocation);
   };
 
+  const photoSelection=useRef(0);
   const selectProfilePhoto = async (file?: File) => {
+    const selection=++photoSelection.current;
     if (!file) return;
 
     const validationMessage = validateProfileImageFile(file);
@@ -192,6 +195,7 @@ export function ResidentSignupScreen() {
 
     try {
       const src = await loadImageFromFile(file);
+      if(selection!==photoSelection.current)return;
       setPendingPhoto({ fileName: file.name, src });
     } catch {
       notify({ title: "Could not load this image. Try another photo.", variant: "warning" });
@@ -232,7 +236,7 @@ export function ResidentSignupScreen() {
       return;
     }
 
-    const registered = await signupResident({
+    await submission.submit(()=>signupResident({
       name: name.trim(),
       email: email.trim(),
       mobile: mobile.trim() || undefined,
@@ -242,8 +246,7 @@ export function ResidentSignupScreen() {
       profilePhoto: profilePhoto || undefined,
       profilePhotoName: profilePhoto ? photoName : undefined,
       location: validLocation
-    });
-    if (registered) router.push("/home");
+    }));
   };
 
   return (
@@ -251,7 +254,7 @@ export function ResidentSignupScreen() {
       subtitle="Create a resident profile and start discovering local plans, help, and businesses."
       title="Join as resident"
     >
-      <div className="space-y-4">
+      <form className="space-y-4" onSubmit={event=>{event.preventDefault();void submit();}}>
         <TextField label="Full name" onChange={setName} required value={name} />
         <TextField
           label="Email"
@@ -309,9 +312,10 @@ export function ResidentSignupScreen() {
           </Button>
         </div>
         {manual ? <LocationFields location={location} onChange={updateManualLocation} /> : null}
-        <Button className="w-full" onClick={submit}>
+        {submission.message?<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{submission.message} <Link href="/login" className="underline">Try login</Link></p>:null}
+        <Button className="w-full" type="submit" disabled={submission.disabled} aria-busy={submission.pending}>
           <UserPlus className="h-4 w-4" />
-          Signup
+          {submission.pending?"Creating account...":submission.seconds>0?`Try again in ${submission.seconds}s`:"Signup"}
         </Button>
         <p className="text-center text-sm text-szocial-muted">
           Already have an account?{" "}
@@ -319,7 +323,7 @@ export function ResidentSignupScreen() {
             Login
           </Link>
         </p>
-      </div>
+      </form>
       <SocialAuthButtons />
       <ProfileImageCropper
         fileName={pendingPhoto?.fileName ?? ""}
@@ -353,9 +357,8 @@ export function ResidentLoginScreen() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      if (await loginResident(identifier, password)) {
-        router.push("/home");
-      }
+      const next=await loginResident(identifier,password);
+      if(next)router.push(next);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -392,7 +395,7 @@ export function ResidentLoginScreen() {
 }
 
 export function BusinessSignupScreen() {
-  const router = useRouter();
+  const submission=useSignupSubmission();
   const { signupBusiness } = useAppStore();
   const { notify } = useToast();
   const { location, setLocation, manual, setManual, detect } = useLocationCapture();
@@ -408,7 +411,7 @@ export function BusinessSignupScreen() {
       notify({ title: "Missing required business fields", variant: "warning" });
       return;
     }
-    if (await signupBusiness({ ownerName, email, password, businessName, category, address, location })) router.push("/business/pricing");
+    await submission.submit(()=>signupBusiness({ ownerName, email, password, businessName, category, address, location }));
   };
 
   return (
@@ -416,7 +419,7 @@ export function BusinessSignupScreen() {
       subtitle="Create your business owner account, choose a paid listing plan, then setup your public listing."
       title="List your business"
     >
-      <div className="space-y-4">
+      <form className="space-y-4" onSubmit={event=>{event.preventDefault();void submit();}}>
         <TextField label="Owner name" onChange={setOwnerName} required value={ownerName} />
         <TextField label="Email" onChange={setEmail} required value={email} />
         <TextField label="Password" onChange={setPassword} required type="password" value={password} />
@@ -445,9 +448,10 @@ export function BusinessSignupScreen() {
           </Button>
         </div>
         {manual ? <LocationFields location={location} onChange={setLocation} /> : null}
-        <Button className="w-full" onClick={submit}>
+        {submission.message?<p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{submission.message} <Link href="/business/login" className="underline">Try login</Link></p>:null}
+        <Button className="w-full" type="submit" disabled={submission.disabled} aria-busy={submission.pending}>
           <Building2 className="h-4 w-4" />
-          Create Business Account
+          {submission.pending?"Creating account...":submission.seconds>0?`Try again in ${submission.seconds}s`:"Create Business Account"}
         </Button>
         <p className="text-center text-sm text-szocial-muted">
           Already listed?{" "}
@@ -456,7 +460,7 @@ export function BusinessSignupScreen() {
           </Link>
         </p>
         <SocialAuthButtons business />
-      </div>
+      </form>
     </AuthLayout>
   );
 }
