@@ -1,75 +1,24 @@
-import { NextResponse } from "next/server";
-import { pricingPlans } from "@/lib/mock-data";
-
-type CreateOrderBody = {
-  planId?: string;
-  amount?: number;
-  businessOwnerId?: string;
-};
-
-export async function POST(request: Request) {
-  const body = (await request.json()) as CreateOrderBody;
-  const plans = Array.isArray(pricingPlans) ? pricingPlans : [];
-  const plan = plans.find((item) => item.id === body.planId) ?? plans[0];
-  if (!plan) {
-    return NextResponse.json(
-      { error: "No pricing plans are available." },
-      { status: 400 }
-    );
+import { NextResponse } from 'next/server';
+import { authenticatedClient } from '@/lib/supabase/server';
+import { adminSupabase } from '@/lib/supabase/admin';
+import { paymentConfiguration,razorpayRequest } from '@/lib/payment-security';
+import { sameOrigin } from '@/lib/auth-security';
+export async function POST(request:Request){
+ if(!sameOrigin(request))return NextResponse.json({error:'Invalid origin'},{status:403});
+ try {
+  const {client}=await authenticatedClient(),{planId,businessId,idempotencyKey}=await request.json(),{keyId,mode}=paymentConfiguration();
+  if(!/^[0-9a-f-]{36}$/i.test(String(idempotencyKey)))throw new Error('A valid idempotency key is required');
+  // The database determines amount and checks ownership. Any client amount is ignored.
+  const {data:purchase,error}=await client.rpc('reserve_payment',{business:businessId,plan:planId,request_key:idempotencyKey,payment_mode:mode});if(error)throw error;
+  if(purchase.status!=='created')throw new Error('This purchase has already been processed');
+  let orderId=purchase.razorpay_order_id;
+  if(!orderId){
+   const admin=adminSupabase();const {data:claimed,error:claimError}=await admin.rpc('claim_payment_order',{payment:purchase.id});if(claimError)throw claimError;
+   if(!claimed)return NextResponse.json({error:'Order creation is pending reconciliation. Retry this purchase shortly; do not start a second purchase.'},{status:409});
+   const order=await razorpayRequest('orders',{amount:purchase.amount_paise,currency:'INR',receipt:purchase.id,notes:{szocial_payment_id:purchase.id}});
+   if(order.amount!==purchase.amount_paise||order.currency!=='INR'||typeof order.id!=='string')throw new Error('Provider returned an unexpected order');
+   const {error:saveError}=await admin.from('payments').update({razorpay_order_id:order.id}).eq('id',purchase.id).is('razorpay_order_id',null);if(saveError)throw saveError;orderId=order.id;
   }
-  const amount = body.amount ?? plan.amountPaise;
-  const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-
-  if (!keyId || !keySecret) {
-    console.warn("Razorpay keys missing. Using mock payment mode.");
-    return NextResponse.json({
-      mock: true,
-      orderId: `order_mock_${Date.now()}`,
-      amount,
-      currency: "INR",
-      keyId: "mock_key",
-      plan
-    });
-  }
-
-  const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
-  const response = await fetch("https://api.razorpay.com/v1/orders", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      amount,
-      currency: "INR",
-      receipt: `szocial_${body.businessOwnerId ?? "business"}_${Date.now()}`
-    })
-  });
-
-  if (!response.ok) {
-    return NextResponse.json(
-      {
-        mock: true,
-        orderId: `order_mock_${Date.now()}`,
-        amount,
-        currency: "INR",
-        keyId,
-        plan,
-        warning: "Razorpay order creation failed. Using mock payment mode."
-      },
-      { status: 200 }
-    );
-  }
-
-  const order = (await response.json()) as { id: string; amount: number; currency: string };
-
-  return NextResponse.json({
-    mock: false,
-    orderId: order.id,
-    amount: order.amount,
-    currency: order.currency,
-    keyId,
-    plan
-  });
+  return NextResponse.json({mock:false,orderId,amount:purchase.amount_paise,currency:'INR',keyId},{headers:{'Cache-Control':'no-store'}});
+ }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Order creation failed'},{status:400});}
 }

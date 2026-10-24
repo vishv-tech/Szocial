@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useRef, useState } from "react";
 import { Building2, LocateFixed, LockKeyhole, MapPin, UserPlus } from "lucide-react";
+import { SocialAuthButtons } from "@/components/SocialAuthButtons";
 import { AuthLayout } from "@/components/AuthLayout";
 import { Button } from "@/components/Button";
 import { useAppStore } from "@/components/AppStoreProvider";
@@ -59,6 +60,7 @@ function TextField({
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type={type}
+        required={required}
         value={value}
       />
     </label>
@@ -196,7 +198,7 @@ export function ResidentSignupScreen() {
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     const missingFields = [
       !name.trim() ? "Full name" : "",
       !email.trim() ? "mobile/email" : "",
@@ -230,7 +232,7 @@ export function ResidentSignupScreen() {
       return;
     }
 
-    const registered = signupResident({
+    const registered = await signupResident({
       name: name.trim(),
       email: email.trim(),
       mobile: mobile.trim() || undefined,
@@ -252,9 +254,9 @@ export function ResidentSignupScreen() {
       <div className="space-y-4">
         <TextField label="Full name" onChange={setName} required value={name} />
         <TextField
-          label="Mobile number or email"
+          label="Email"
           onChange={setEmail}
-          placeholder="vishv@szocial.local"
+          placeholder="you@example.com"
           required
           type="email"
           value={email}
@@ -318,6 +320,7 @@ export function ResidentSignupScreen() {
           </Link>
         </p>
       </div>
+      <SocialAuthButtons />
       <ProfileImageCropper
         fileName={pendingPhoto?.fileName ?? ""}
         imageSrc={pendingPhoto?.src ?? ""}
@@ -338,8 +341,8 @@ export function ResidentSignupScreen() {
 export function ResidentLoginScreen() {
   const router = useRouter();
   const { loginResident } = useAppStore();
-  const [identifier, setIdentifier] = useState("vishv@szocial.local");
-  const [password, setPassword] = useState("demo123");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
 
@@ -350,8 +353,7 @@ export function ResidentLoginScreen() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await new Promise((resolve) => window.setTimeout(resolve, 150));
-      if (loginResident(identifier, password)) {
+      if (await loginResident(identifier, password)) {
         router.push("/home");
       }
     } finally {
@@ -362,11 +364,11 @@ export function ResidentLoginScreen() {
 
   return (
     <AuthLayout
-      subtitle="Login with your mock resident account or a profile you created locally."
+      subtitle="Sign in securely to your Szocial account."
       title="Resident login"
     >
       <form className="space-y-4" onSubmit={submit}>
-        <TextField label="Email or mobile" onChange={setIdentifier} required value={identifier} />
+        <TextField label="Email" onChange={setIdentifier} required value={identifier} />
         <TextField label="Password" onChange={setPassword} required type="password" value={password} />
         <Button
           className="w-full"
@@ -382,6 +384,8 @@ export function ResidentLoginScreen() {
             Create an account
           </Link>
         </p>
+        <Link className="block text-sm font-semibold text-szocial-teal" href="/forgot-password">Forgot password?</Link>
+        <SocialAuthButtons />
       </form>
     </AuthLayout>
   );
@@ -399,13 +403,12 @@ export function BusinessSignupScreen() {
   const [category, setCategory] = useState<BusinessCategory>("Cafe");
   const [address, setAddress] = useState("");
 
-  const submit = () => {
+  const submit = async () => {
     if (!ownerName || !email || !password || !businessName || !address) {
       notify({ title: "Missing required business fields", variant: "warning" });
       return;
     }
-    signupBusiness({ ownerName, email, password, businessName, category, address, location });
-    router.push("/business/pricing");
+    if (await signupBusiness({ ownerName, email, password, businessName, category, address, location })) router.push("/business/pricing");
   };
 
   return (
@@ -415,7 +418,7 @@ export function BusinessSignupScreen() {
     >
       <div className="space-y-4">
         <TextField label="Owner name" onChange={setOwnerName} required value={ownerName} />
-        <TextField label="Mobile/email" onChange={setEmail} required value={email} />
+        <TextField label="Email" onChange={setEmail} required value={email} />
         <TextField label="Password" onChange={setPassword} required type="password" value={password} />
         <TextField label="Business name" onChange={setBusinessName} required value={businessName} />
         <label className="block">
@@ -452,6 +455,7 @@ export function BusinessSignupScreen() {
             Business login
           </Link>
         </p>
+        <SocialAuthButtons />
       </div>
     </AuthLayout>
   );
@@ -460,8 +464,8 @@ export function BusinessSignupScreen() {
 export function BusinessLoginScreen() {
   const router = useRouter();
   const { loginBusiness } = useAppStore();
-  const [identifier, setIdentifier] = useState("owner@mocha.local");
-  const [password, setPassword] = useState("demo123");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
 
   return (
     <AuthLayout
@@ -473,8 +477,8 @@ export function BusinessLoginScreen() {
         <TextField label="Password" onChange={setPassword} required type="password" value={password} />
         <Button
           className="w-full"
-          onClick={() => {
-            const route = loginBusiness(identifier, password);
+          onClick={async () => {
+            const route = await loginBusiness(identifier, password);
             if (route) router.push(route);
           }}
         >
@@ -487,6 +491,7 @@ export function BusinessLoginScreen() {
             Create business account
           </Link>
         </p>
+        <SocialAuthButtons />
       </div>
     </AuthLayout>
   );

@@ -158,8 +158,8 @@ export function PostCard({ post }: PostCardProps) {
           </button>
           <button
             className="flex min-h-11 flex-col items-center justify-center rounded-xl transition hover:bg-szocial-mist"
-            onClick={() => {
-              const chatId = startPostChat(post.id);
+            onClick={async () => {
+              const chatId = await startPostChat(post.id);
               if (chatId) router.push(`/chats?chatId=${chatId}`);
             }}
             type="button"

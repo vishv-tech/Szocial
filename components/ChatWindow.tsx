@@ -50,6 +50,8 @@ export function ChatWindow({ chat }: ChatWindowProps) {
     state
   } = useAppStore();
   const { notify } = useToast();
+  const sendingRef=useRef(false);
+  const [sending,setSending]=useState(false);
   const [message, setMessage] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
   const [isSharingLocation, setIsSharingLocation] = useState(false);
@@ -111,9 +113,11 @@ export function ChatWindow({ chat }: ChatWindowProps) {
     asArray(chat.participantIds).includes(currentParticipantId ?? "") &&
     (chat.status === "Active" || blockedByCurrentParticipant);
   const canSendMessages = canMessage(state.chats, chat, currentParticipantId);
-  const sendMessage = () => {
-    if (sendChatMessage(chat.id, message)) setMessage("");
-    else notify({ title: "Message not sent", description: "Messaging is unavailable or the message could not be saved. Your draft was kept.", variant: "warning" });
+  const sendMessage = async () => {
+    if(sendingRef.current)return;
+    sendingRef.current=true;setSending(true);
+    try {if (await sendChatMessage(chat.id, message)) setMessage("");}
+    finally{sendingRef.current=false;setSending(false);}
   };
 
   const shareCurrentLocation = () => {
@@ -143,14 +147,14 @@ export function ChatWindow({ chat }: ChatWindowProps) {
     };
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const latitude = position.coords.latitude;
         const longitude = position.coords.longitude;
         const query = encodeURIComponent(`${latitude},${longitude}`);
         const mapsUrl =
           `https://www.google.com/maps/search/?api=1&query=${query}`;
 
-        const shared = sendChatMessage(chat.id, {
+        const shared = await sendChatMessage(chat.id, {
           text: "Shared a location",
           kind: "location",
           latitude,
@@ -325,7 +329,7 @@ export function ChatWindow({ chat }: ChatWindowProps) {
             value={message}
           />
           <Button
-            disabled={!canSendMessages || !message.trim()}
+            disabled={sending || !canSendMessages || !message.trim()}
             onClick={sendMessage}
           >
             <Send className="h-4 w-4" />

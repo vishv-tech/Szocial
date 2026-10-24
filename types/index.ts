@@ -16,7 +16,6 @@ export type ResidentUser = {
   name: string;
   email: string;
   mobile?: string;
-  password: string;
   avatar: string;
   profilePhoto?: string;
   profilePhotoName?: string;
@@ -115,7 +114,6 @@ export type BusinessOwner = {
   id: string;
   ownerName: string;
   email: string;
-  password: string;
   businessId: string;
   paymentStatus: PaymentStatus;
 };

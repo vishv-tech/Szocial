@@ -100,9 +100,9 @@ export function BusinessCard({ business }: BusinessCardProps) {
             Save
           </Button>
           <Button
-            onClick={() => {
-              const chatId = startBusinessChat(business.id);
-              router.push(`/chats?chatId=${chatId}`);
+            onClick={async () => {
+              const chatId = await startBusinessChat(business.id);
+              if (chatId) router.push(`/chats?chatId=${chatId}`);
             }}
             variant="outline"
           >

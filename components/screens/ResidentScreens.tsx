@@ -40,8 +40,10 @@ import { StatCard } from "@/components/StatCard";
 import { useAppStore } from "@/components/AppStoreProvider";
 import { useToast } from "@/components/ToastProvider";
 import type { LocalPost, LocationInfo, ResidentUser } from "@/types";
-import { discoveryPosts, queryPosts, type FeedSort } from "@/lib/feed";
+import { type FeedSort } from "@/lib/feed";
 import { useFeedLocation } from "@/components/useFeedLocation";
+import { useServerFeed } from "@/components/useServerFeed";
+import { FeedPaging } from "@/components/FeedPaging";
 import { FeedSortControl } from "@/components/FeedSortControl";
 import { getLocationName } from "@/lib/location";
 import { sortByNearbyRelevance } from "@/lib/nearby-ranking";
@@ -79,9 +81,6 @@ function textMatch(text: string, query: string) {
   return text.toLowerCase().includes(query.trim().toLowerCase());
 }
 
-function filterPosts(posts: LocalPost[], query: string) {
-  return queryPosts(posts, query, "newest", { area: "", city: "" });
-}
 
 type LegacyPostOwnerFields = LocalPost & {
   creatorId?: string;
@@ -171,15 +170,8 @@ export function HomeScreen() {
   const [tab, setTab] = useState<(typeof postTabs)[number]>("All");
   const [locationOpen, setLocationOpen] = useState(false);
 
-  const posts = useMemo(() => {
-    let filtered = filterPosts(
-      discoveryPosts(asArray(state.posts), currentUser.id, state.chats),
-      query
-    );
-    if (tab === "Fun") filtered = filtered.filter((post) => post.type === "fun");
-    if (tab === "Help") filtered = filtered.filter((post) => post.type === "help");
-    return queryPosts(filtered, query, sort, state.location);
-  }, [currentUser.id, query, state.location, state.posts, state.chats, sort, tab]);
+  const feed = useServerFeed(query,sort,'All',tab==='Fun'?'fun':tab==='Help'?'help':undefined);
+  const posts = feed.posts;
 
   return (
     <ResidentShell rightPanel={<HomeRightPanel />}>
@@ -210,14 +202,15 @@ export function HomeScreen() {
               <PostCard key={post.id} post={post} />
             ))}
           </div>
-        ) : (
+        ) : !feed.loading && !feed.error ? (
           <EmptyState
             action={<Button href="/post">Create a post</Button>}
             description="Try another search or start a new local plan."
             icon={<Search className="h-6 w-6" />}
             title="No local posts found"
           />
-        )}
+        ) : null}
+        <FeedPaging {...feed} />
       </div>
       <LocationModal onClose={() => setLocationOpen(false)} open={locationOpen} />
     </ResidentShell>
@@ -231,20 +224,8 @@ export function ExploreScreen() {
   const [sort, setSort] = useState<FeedSort>("nearby");
   const [category, setCategory] = useState<(typeof exploreCategories)[number]>("All");
 
-  const featuredPosts = useMemo(() => {
-    let posts = filterPosts(
-      discoveryPosts(asArray(state.posts), currentUser.id, state.chats),
-      query
-    );
-    if (category === "Sports") posts = posts.filter((post) => ["Cricket", "Football", "Badminton", "Gym"].includes(post.category));
-    if (category === "Food") posts = posts.filter((post) => ["Cafe", "Food", "Restaurant"].includes(post.category));
-    if (category === "Movies") posts = posts.filter((post) => post.category === "Movie");
-    if (category === "Adventure") posts = posts.filter((post) => post.category === "Hiking");
-    if (category === "Study") posts = posts.filter((post) => ["Study", "Tutor"].includes(post.category));
-    if (category === "Help") posts = posts.filter((post) => post.type === "help");
-    return queryPosts(posts, query, sort, state.location);
-  }, [category, currentUser.id, query, state.location, state.posts, state.chats, sort]);
-
+  const feed = useServerFeed(query,sort,category);
+  const featuredPosts = feed.posts;
 
   return (
     <ResidentShell>
@@ -270,7 +251,7 @@ export function ExploreScreen() {
           </div>
         </section>
 
-        {!featuredPosts.length ? <EmptyState title="No posts found" description="Try another location or keyword." icon={<Search className="h-6 w-6" />} /> : null}
+        {!featuredPosts.length && !feed.loading && !feed.error ? <EmptyState title="No posts found" description="Try another location or keyword." icon={<Search className="h-6 w-6" />} /> : null}
         {!query.trim() ? <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-soft">
           <h2 className="text-xl font-bold text-szocial-ink">Recommended neighbours</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -283,6 +264,7 @@ export function ExploreScreen() {
               </div>)}
           </div>
         </section> : null}
+        <FeedPaging {...feed} />
       </div>
     </ResidentShell>
   );
@@ -353,12 +335,12 @@ export function CreatePostScreen() {
     return true;
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!validate()) {
       notify({ title: "Please fill the required fields", variant: "warning" });
       return;
     }
-    if (!createPost(buildInput())) return;
+    if (!await createPost(buildInput())) return;
     router.push(mode === "help" ? "/help" : "/home");
   };
 
@@ -559,19 +541,8 @@ export function HelpScreen() {
   const { state, currentUser, locationLabel } = useAppStore();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<(typeof helpTabs)[number]>("Need Help");
-  const helpPosts = useMemo(() => {
-    let posts = queryPosts(
-      discoveryPosts(asArray(state.posts), currentUser.id, state.chats, tab === "Solved")
-        .filter(post => post.type === "help"), query, "nearby", state.location);
-    if (tab === "Urgent") posts = posts.filter((post) => post.urgency === "Urgent");
-    if (tab === "Solved") posts = posts.filter((post) => post.status === "Solved");
-    if (tab === "Need Help") posts = posts.filter((post) => post.status === "Active");
-    return sortByNearbyRelevance(
-      newestFirst(posts),
-      state.location,
-      (post) => post
-    );
-  }, [query, state.location, state.posts, state.chats, currentUser.id, tab]);
+  const feed = useServerFeed(query,'nearby',tab==='Urgent'?'Urgent':'All','help',tab==='Solved'?'Solved':'Active');
+  const helpPosts = feed.posts;
 
   return (
     <ResidentShell>
@@ -598,7 +569,7 @@ export function HelpScreen() {
             {asArray(helpPosts).map((post) => (
               <HelpCard key={post.id} request={post} />
             ))}
-            {!helpPosts.length ? (
+            {!helpPosts.length && !feed.loading && !feed.error ? (
               <EmptyState
                 action={<Button href="/post?type=help">Post for Help</Button>}
                 description="Try another filter or create the first local help request."
@@ -607,6 +578,7 @@ export function HelpScreen() {
               />
             ) : null}
           </div>
+        <FeedPaging {...feed} />
       </div>
     </ResidentShell>
   );
@@ -851,8 +823,8 @@ export function ProfileScreen() {
             Privacy Settings
           </Button>
           <Button
-            onClick={() => {
-              logoutResident();
+            onClick={async () => {
+              await logoutResident();
               router.push("/");
             }}
             variant="secondary"
@@ -902,8 +874,8 @@ export function ProfileScreen() {
           </div>
           <Button
             className="w-full"
-            onClick={() => {
-              updateResidentProfile({
+            onClick={async () => {
+              await updateResidentProfile({
                 name: profile.name,
                 bio: profile.bio,
                 age: profile.age ? Number(profile.age) : undefined,
@@ -924,7 +896,7 @@ export function ProfileScreen() {
         imageSrc={pendingPhoto?.src ?? ""}
         onCancel={() => setPendingPhoto(null)}
         onError={(message) => notify({ title: message, variant: "warning" })}
-        onUsePhoto={(croppedPhoto) => {
+        onUsePhoto={async (croppedPhoto) => {
           if (!pendingPhoto) return;
           const nextPhoto = {
             profilePhoto: croppedPhoto,
@@ -934,7 +906,7 @@ export function ProfileScreen() {
             ...current,
             ...nextPhoto
           }));
-          updateResidentProfile({
+          await updateResidentProfile({
             ...nextPhoto,
             updatedAt: new Date().toISOString()
           });

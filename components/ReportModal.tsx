@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Flag } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Modal } from "@/components/Modal";
@@ -34,11 +34,13 @@ export function ReportModal({
   reasons = defaultReasons
 }: ReportModalProps) {
   const { submitReport } = useAppStore();
+  const pending=useRef(false);
+  const [submitting,setSubmitting]=useState(false);
   const [reason, setReason] = useState<ReportReason>(reasons[0]);
 
   return (
     <Modal
-      description="Choose the closest reason. Reports are stored in this browser and visible in its admin panel; remote moderation is not connected."
+      description="Choose the closest reason. Your report is securely saved for moderation."
       onClose={onClose}
       open={open}
       title={`Report ${itemType.toLowerCase()}`}
@@ -61,8 +63,12 @@ export function ReportModal({
       </div>
       <Button
         className="mt-5 w-full"
-        onClick={() => {
-          if (submitReport(itemType, itemId, itemLabel, reason)) onClose();
+        disabled={submitting}
+        onClick={async () => {
+          if(pending.current)return;
+          pending.current=true;setSubmitting(true);
+          try {if (await submitReport(itemType, itemId, itemLabel, reason)) onClose();}
+          finally{pending.current=false;setSubmitting(false);}
         }}
       >
         <Flag className="h-4 w-4" />

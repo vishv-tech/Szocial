@@ -60,8 +60,8 @@ export function BusinessLayout({ children }: { children: ReactNode }) {
               Activity{businessUnreadCount ? ` (${businessUnreadCount})` : ""}
             </Button>
             <Button
-              onClick={() => {
-                logoutBusiness();
+              onClick={async () => {
+                await logoutBusiness();
                 router.push("/");
               }}
               variant="outline"

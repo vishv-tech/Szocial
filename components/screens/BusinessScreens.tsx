@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BadgeCheck,
   BarChart3,
@@ -107,7 +107,8 @@ export function BusinessPricingScreen() {
     failBusinessPayment
   } = useAppStore();
   const { notify } = useToast();
-  const [pendingPlan, setPendingPlan] = useState<PaymentPlan | null>(null);
+  const purchaseKeys = useRef(new Map<string,string>());
+  const openingCheckout = useRef(false);
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const message = searchParams.get("message");
   const plans = asArray(state.paymentPlans);
@@ -119,6 +120,8 @@ export function BusinessPricingScreen() {
       return;
     }
 
+    if(openingCheckout.current)return;
+    openingCheckout.current=true;
     setBusyPlan(plan.id);
     try {
       const response = await fetch("/api/razorpay/create-order", {
@@ -126,31 +129,15 @@ export function BusinessPricingScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planId: plan.id,
-          amount: plan.amountPaise,
-          businessOwnerId: currentBusinessOwner.id
+          businessId: currentBusinessOwner.businessId,
+          idempotencyKey: purchaseKeys.current.get(plan.id) ?? (()=>{const key=crypto.randomUUID();purchaseKeys.current.set(plan.id,key);return key;})()
         })
       });
       const order = await response.json();
 
-      if (order.mock || !process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID) {
-        setPendingPlan(plan);
-        notify({
-          title: "Mock payment mode",
-          description: "Razorpay keys are missing, so local testing uses a simulated payment."
-        });
-        return;
-      }
-
+      if(!response.ok)throw new Error(order.error??'Could not create payment order');
       const loaded = await loadRazorpayScript();
-      if (!loaded || !window.Razorpay) {
-        setPendingPlan(plan);
-        notify({
-          title: "Checkout unavailable",
-          description: "Use mock payment to keep testing locally.",
-          variant: "warning"
-        });
-        return;
-      }
+      if (!loaded || !window.Razorpay) throw new Error('Checkout could not load. Please try again.');
 
       const checkout = new window.Razorpay({
         key: order.keyId,
@@ -175,7 +162,7 @@ export function BusinessPricingScreen() {
           });
           const result = await verify.json();
           if (result.success) {
-            completeBusinessPayment(plan, paymentResponse.razorpay_payment_id, Boolean(result.mock));
+            await completeBusinessPayment(plan, paymentResponse.razorpay_payment_id, Boolean(result.mock));
             router.push("/business/setup");
           } else {
             failBusinessPayment(plan);
@@ -197,10 +184,10 @@ export function BusinessPricingScreen() {
         }
       });
       checkout.open();
-    } catch {
-      setPendingPlan(plan);
-      notify({ title: "Payment API unavailable", description: "Use mock payment mode.", variant: "warning" });
+    } catch(error) {
+      notify({ title: "Payment unavailable", description: error instanceof Error?error.message:'Please try again.', variant: "warning" });
     } finally {
+      openingCheckout.current=false;
       setBusyPlan(null);
     }
   };
@@ -214,7 +201,7 @@ export function BusinessPricingScreen() {
             Paid local discovery for serious businesses.
           </h1>
           <p className="mt-2 max-w-2xl leading-7 text-szocial-muted">
-            Pick a plan, complete Razorpay test checkout or mock payment, then setup
+            Pick a plan, complete secure Razorpay checkout, then setup
             your listing and appear in New in Location.
           </p>
           {message ? (
@@ -266,39 +253,7 @@ export function BusinessPricingScreen() {
           )}
         </div>
       </div>
-      <Modal
-        description="Development-only fallback. Add Razorpay test keys to use real checkout."
-        onClose={() => setPendingPlan(null)}
-        open={Boolean(pendingPlan)}
-        title="Mock payment mode"
-      >
-        {pendingPlan ? (
-          <div className="space-y-4">
-            <p className="rounded-2xl bg-szocial-mist p-4 text-sm leading-6 text-szocial-muted">
-              You selected <strong>{pendingPlan.name}</strong> for Rs. {pendingPlan.price}/month.
-            </p>
-            <Button
-              className="w-full"
-              onClick={() => {
-                completeBusinessPayment(pendingPlan, `pay_mock_${Date.now()}`, true);
-                router.push("/business/setup");
-              }}
-            >
-              Simulate Successful Payment
-            </Button>
-            <Button
-              className="w-full"
-              onClick={() => {
-                failBusinessPayment(pendingPlan);
-                router.push("/business/payment-failed");
-              }}
-              variant="outline"
-            >
-              Simulate Failed Payment
-            </Button>
-          </div>
-        ) : null}
-      </Modal>
+
     </BusinessLayout>
   );
 }
@@ -416,12 +371,12 @@ function BusinessProfileForm({ mode }: { mode: "setup" | "profile" }) {
     }
   }, [currentBusinessOwner, hydrated, mode, notify, router]);
 
-  const save = () => {
+  const save = async () => {
     if (!form.name || !form.category || !form.address || !form.phone || !form.about) {
       notify({ title: "Fill all required listing details", variant: "warning" });
       return false;
     }
-    updateBusinessProfile({
+    return await updateBusinessProfile({
       name: form.name,
       category: form.category as BusinessCategory,
       address: form.address,
@@ -440,7 +395,6 @@ function BusinessProfileForm({ mode }: { mode: "setup" | "profile" }) {
       tags: form.tags.split(",").map((item) => item.trim()).filter(Boolean),
       priceRange: form.priceRange as "Budget" | "Mid-range" | "Premium"
     });
-    return true;
   };
 
   return (
@@ -512,26 +466,25 @@ function BusinessProfileForm({ mode }: { mode: "setup" | "profile" }) {
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           <Button
-            onClick={() => {
-              if (save()) setPreviewOpen(true);
+            onClick={async () => {
+              if (await save()) setPreviewOpen(true);
             }}
             variant="outline"
           >
             Preview Listing
           </Button>
           <Button
-            onClick={() => {
-              if (!save()) return;
-              if (publishBusiness()) router.push("/business/dashboard");
+            onClick={async () => {
+              if (!await save()) return;
+              if (await publishBusiness()) router.push("/business/dashboard");
               else router.push("/business/pricing?message=Complete payment to make your listing live.");
             }}
           >
             Make Live
           </Button>
           <Button
-            onClick={() => {
-              save();
-              notify({ title: "Business draft saved" });
+            onClick={async () => {
+              if(await save()) notify({ title: "Business draft saved" });
             }}
             variant="outline"
           >
