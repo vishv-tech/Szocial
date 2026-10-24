@@ -101,53 +101,12 @@ export default function LandingPage() {
               <Button href="/business/signup" size="lg" variant="secondary">
                 List Your Business
               </Button>
-              <Button href="/home" size="lg" variant="light">
-                Explore Demo
+              <Button href="/home" size="lg" variant="light" color="golden">
+                Plus One!
               </Button>
             </div>
           </div>
-          <div className="mx-auto w-full max-w-sm rounded-[2rem] border border-white/25 bg-white p-3 text-szocial-ink shadow-2xl">
-            <div className="rounded-[1.6rem] bg-szocial-mist p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-szocial-orange">New to Bandra</p>
-                  <h2 className="text-xl font-bold">Local preview</h2>
-                </div>
-                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-szocial-teal">
-                  Demo
-                </span>
-              </div>
-              <PhonePreviewCard
-                badge="Fun"
-                text="7 PM cricket at Five Gardens, anyone up?"
-                title="Need 2 people for cricket"
-              />
-              <PhonePreviewCard
-                badge="Help"
-                text="Need maths teacher for Class 8 near Bandra East."
-                title="Tutor request"
-              />
-              <div className="mt-3 overflow-hidden rounded-3xl bg-white shadow-sm">
-                <img
-                  alt="The Mocha House"
-                  className="h-28 w-full object-cover"
-                  src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=900&q=80"
-                />
-                <div className="p-4">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold">The Mocha House</h3>
-                    <BadgeCheck className="h-4 w-4 text-szocial-teal" />
-                  </div>
-                  <p className="mt-1 text-sm text-szocial-muted">
-                    New cafe opened in Bandra East.
-                  </p>
-                  <p className="mt-2 rounded-xl bg-szocial-tealSoft px-3 py-2 text-xs font-bold text-szocial-teal">
-                    10% off on first visit
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+          
         </div>
       </section>
 
