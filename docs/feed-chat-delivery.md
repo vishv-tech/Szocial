@@ -80,4 +80,16 @@ No tables, indexes or destructive migrations were created. `Chat.readAtByPartici
 
 Branch: `feature/szocial-feed-search-chat-fixes`, based on `cc0cd335b21641806e3b82621878ca79d2814133` (confirmed main tip at start).
 
-GitHub API access initially returned Forbidden; delivery/push status is reported in the chat after the final attempt. No merge or force-push is authorized or performed. Local frontend testing is supported; production multiuser readiness is not claimed.
+Implementation commit: `344e949` (Improve nearby discovery, help feeds, timestamps and local chat reliability).
+
+The branch was successfully pushed to `origin/feature/szocial-feed-search-chat-fixes`. PR creation was attempted with `gh pr create --base main --head feature/szocial-feed-search-chat-fixes` and a complete description. GitHub returned `Post https://api.github.com/graphql: Forbidden`. Therefore **no pull request was created**; API access needs to be enabled before that operation can succeed. Git transport access works, so a new Git token is not being requested.
+
+Manual PR creation link: https://github.com/vishv-tech/Szocial/pull/new/feature/szocial-feed-search-chat-fixes
+
+The suggested PR description is saved in `docs/pull-request.md`. After GitHub API access is available, run:
+
+```sh
+gh pr create --base main --head feature/szocial-feed-search-chat-fixes --title "Improve nearby discovery, Help feeds and local chat reliability" --body-file docs/pull-request.md
+```
+
+No merge or force-push was performed. Local frontend testing is supported; production multiuser readiness is not claimed.
